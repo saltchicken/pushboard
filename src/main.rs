@@ -20,13 +20,19 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
 }
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
-use embedded_graphics::{pixelcolor::Bgr565, prelude::*};
+// ‼️ MODIFIED: Added imports for drawing lines
+use embedded_graphics::{
+    pixelcolor::Bgr565,
+    prelude::*,
+    primitives::{Line, Primitive, PrimitiveStyle}, // ‼️ ADDED
+};
 use log::{debug, info, warn};
 use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
+
 struct AppState {
     // mode: Mode,
     pad_files: HashMap<u8, PathBuf>,
@@ -40,6 +46,9 @@ struct AppState {
     is_delete_held: bool,
     is_select_held: bool,
     waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
+    // ‼️ ADDED: State for sample start/end points (normalized 0.0 to 1.0)
+    sample_start_point: HashMap<u8, f64>,
+    sample_end_point: HashMap<u8, f64>,
 }
 // --- Color Constants for different states ---
 const COLOR_OFF: u8 = Push2Colors::BLACK;
@@ -52,8 +61,21 @@ const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
 const COLOR_WAVEFORM: Bgr565 = Bgr565::CYAN;
+// ‼️ ADDED: Colors for the new start/stop lines and bars
+const COLOR_START_LINE: Bgr565 = Bgr565::GREEN;
+const COLOR_STOP_LINE: Bgr565 = Bgr565::RED;
+
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
+
+// ‼️ ADDED: Constants for waveform drawing area
+// --- Waveform Display Constants ---
+const WAVEFORM_Y_START: i32 = 0; // Top of display
+const WAVEFORM_Y_END: i32 = 160; // Bottom of display
+const WAVEFORM_X_START: i32 = 0;
+const WAVEFORM_X_END: i32 = 960; // Full width of display
+const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
@@ -83,6 +105,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         is_delete_held: false,
         is_select_held: false,
         waveform_cache: HashMap::new(),
+        // ‼️ ADDED: Initialize new state hashmaps
+        sample_start_point: HashMap::new(),
+        sample_end_point: HashMap::new(),
     };
     info!("\nConnection open. Soundboard example running.");
     info!(
@@ -140,6 +165,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.pitch_shift_semitones.remove(&address);
                                 app_state.playback_volume.remove(&address);
                                 app_state.waveform_cache.remove(&address);
+                                // ‼️ ADDED: Clear start/stop points on delete
+                                app_state.sample_start_point.remove(&address);
+                                app_state.sample_end_point.remove(&address);
+
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -148,31 +177,38 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                     } else if app_state.is_select_held {
-                        // This is the logic from the old Mode::Edit
+                        // This is the logic for selecting a pad to edit
                         if !path.exists() {
                             continue;
                         }
                         if let Some(prev_selected_key) = app_state.selected_for_edit {
                             if prev_selected_key == address {
+                                // Deselect if pressing the same pad
                                 app_state.selected_for_edit = None;
                                 push2.set_pad_color(coord, COLOR_HAS_FILE)?;
                             } else {
+                                // Deselect old pad
                                 if let Some(old_coord) =
                                     push2.button_map.get_note(prev_selected_key)
                                 {
                                     push2.set_pad_color(old_coord, COLOR_HAS_FILE)?;
                                 }
+                                // Select new pad
                                 app_state.selected_for_edit = Some(address);
                                 push2.set_pad_color(coord, COLOR_SELECTED)?;
                             }
                         } else {
+                            // No pad was selected, select this one
                             app_state.selected_for_edit = Some(address);
                             push2.set_pad_color(coord, COLOR_SELECTED)?;
                         }
                     } else {
+                        // This is the default playback/record logic
                         if path.exists() {
+                            // Pad has a file, set color to "playing" (will be reset on release)
                             push2.set_pad_color(coord, COLOR_PLAYING)?;
                         } else {
+                            // Pad is empty, start recording
                             info!("START recording to {}", path.display());
                             let cmd = AudioCommand::Start(path.clone());
                             if let Err(e) = app_state.audio_cmd_tx.send(cmd) {
@@ -191,8 +227,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
+
+                    // If Select or Delete is held, we just reset the pad color
+                    // (the action happened on press)
                     if app_state.is_delete_held || app_state.is_select_held {
-                        // Reset color if it was a 'select' action, otherwise do nothing
                         if app_state.is_select_held {
                             if app_state.selected_for_edit == Some(address) {
                                 push2.set_pad_color(coord, COLOR_SELECTED)?;
@@ -204,19 +242,22 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         }
                         continue;
                     }
+
                     if app_state.active_recording_key == Some(address) {
+                        // This was a recording, stop it
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
                             eprintln!("Failed to send STOP command: {}", e);
                         }
                         app_state.active_recording_key = None;
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
-
-
+                        // Invalidate waveform cache so it re-loads
                         app_state.waveform_cache.remove(&address);
                     } else if path.exists() {
+                        // This was a playback trigger
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
 
+                        // --- Playback and Selection Logic ---
                         // Store the previously selected key
                         let prev_selected_key = app_state.selected_for_edit;
                         // Set the new pad as selected
@@ -232,11 +273,25 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
 
+                        // Get all playback parameters
                         let pitch_shift = app_state
                             .pitch_shift_semitones
                             .get(&address)
                             .cloned()
                             .unwrap_or(0.0);
+
+                        // ‼️ ADDED: Get start/end points for playback
+                        let start_point = app_state
+                            .sample_start_point
+                            .get(&address)
+                            .cloned()
+                            .unwrap_or(0.0);
+                        let end_point = app_state
+                            .sample_end_point
+                            .get(&address)
+                            .cloned()
+                            .unwrap_or(1.0);
+
                         let path_clone = path.clone();
                         let sink_clone =
                             match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
@@ -254,14 +309,22 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
+
+                        // Spawn the playback task
                         tokio::spawn(async move {
                             let mut temp_path: Option<PathBuf> = None;
-                            let path_to_play = if pitch_shift.abs() > 0.01 {
+
+                            // ‼️ MODIFIED: This block now creates a processed copy
+                            // (pitched AND trimmed)
+                            let path_to_play = {
                                 let path_for_blocking = path_clone.clone();
                                 match tokio::task::spawn_blocking(move || {
-                                    audio_processor::create_pitched_copy_sync(
+                                    // ‼️ RENAMED function and passed new args
+                                    audio_processor::create_processed_copy_sync(
                                         &path_for_blocking,
                                         pitch_shift,
+                                        start_point,
+                                        end_point,
                                     )
                                 })
                                 .await
@@ -272,7 +335,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     }
                                     Ok(Err(e)) => {
                                         eprintln!(
-                                            "Failed to create pitched copy: {}. Playing original.",
+                                            "Failed to create processed copy: {}. Playing original.",
                                             e
                                         );
                                         path_clone
@@ -282,9 +345,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                         path_clone
                                     }
                                 }
-                            } else {
-                                path_clone
-                            };
+                            }; // ‼️ End of `path_to_play` block
+
                             if let Err(e) = audio_player::play_audio_file(
                                 &path_to_play,
                                 sink_clone,
@@ -294,6 +356,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             {
                                 eprintln!("Playback failed: {}", e);
                             }
+
+                            // Clean up the temporary file
                             if let Some(p) = temp_path {
                                 if let Err(e) = tokio_fs::remove_file(&p).await {
                                     eprintln!(
@@ -304,9 +368,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 }
                             }
                         });
-
+                        // Set pad color to selected (since it's now the active one)
                         push2.set_pad_color(coord, COLOR_SELECTED)?;
                     } else {
+                        // Pad was empty and released (no recording happened)
                         push2.set_pad_color(coord, COLOR_OFF)?;
                     }
                 }
@@ -365,13 +430,16 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 Push2Event::EncoderTwisted {
                     name, raw_delta, ..
                 } => {
+                    // Normalize delta to a signed i32
                     let delta = if raw_delta > 64 {
                         -((128 - raw_delta) as i32)
                     } else {
                         raw_delta as i32
                     };
+
                     match name {
                         EncoderName::Track1 => {
+                            // Volume Control
                             if let Some(key) = app_state.selected_for_edit {
                                 let current_volume =
                                     app_state.playback_volume.entry(key).or_insert(1.0);
@@ -384,6 +452,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                         EncoderName::Track2 => {
+                            // Pitch Control
                             if let Some(key) = app_state.selected_for_edit {
                                 let current_pitch =
                                     app_state.pitch_shift_semitones.entry(key).or_insert(0.0);
@@ -393,6 +462,41 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 info!(
                                     "Set pitch for selected pad to {:.2} semitones",
                                     *current_pitch
+                                );
+                            }
+                        }
+                        // ‼️ ADDED: Handle Encoders 3 and 4
+                        EncoderName::Track3 => {
+                            // Start Point Control
+                            if let Some(key) = app_state.selected_for_edit {
+                                // Get the current end point to constrain the start point
+                                let current_end =
+                                    *app_state.sample_end_point.entry(key).or_insert(1.0);
+                                let current_start =
+                                    app_state.sample_start_point.entry(key).or_insert(0.0);
+                                *current_start += delta as f64 * 0.005; // 0.5% per tick
+                                // Clamp start from 0.0 up to the current end point
+                                *current_start = current_start.clamp(0.0, current_end);
+                                info!(
+                                    "Set start point for selected pad to {:.2}%",
+                                    *current_start * 100.0
+                                );
+                            }
+                        }
+                        EncoderName::Track4 => {
+                            // End Point Control
+                            if let Some(key) = app_state.selected_for_edit {
+                                // Get the current start point to constrain the end point
+                                let current_start =
+                                    *app_state.sample_start_point.entry(key).or_insert(0.0);
+                                let current_end =
+                                    app_state.sample_end_point.entry(key).or_insert(1.0);
+                                *current_end += delta as f64 * 0.005; // 0.5% per tick
+                                // Clamp end from the current start point up to 1.0
+                                *current_end = current_end.clamp(current_start, 1.0);
+                                info!(
+                                    "Set end point for selected pad to {:.2}%",
+                                    *current_end * 100.0
                                 );
                             }
                         }
@@ -408,11 +512,42 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         // Clear the display buffer to black
         push2.display.clear(Bgr565::BLACK).unwrap(); // Infallible
 
-
         // Draw waveform AND encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
-            // --- Load/Draw Waveform ---
+            // ‼️ --- MOVED all parameter definitions to the top of the block ---
+            // This fixes the scope errors from before.
 
+            // Get Volume (for Encoder 1)
+            let volume = app_state
+                .playback_volume
+                .get(&selected_key)
+                .cloned()
+                .unwrap_or(1.0);
+
+            // Get Pitch (for Encoder 2)
+            let pitch = app_state
+                .pitch_shift_semitones
+                .get(&selected_key)
+                .cloned()
+                .unwrap_or(0.0);
+
+            // Get Start Point (for Encoder 3)
+            let start_pct = app_state
+                .sample_start_point
+                .get(&selected_key)
+                .cloned()
+                .unwrap_or(0.0) as f32; // Use f32 for drawing
+
+            // Get End Point (for Encoder 4)
+            let end_pct = app_state
+                .sample_end_point
+                .get(&selected_key)
+                .cloned()
+                .unwrap_or(1.0) as f32; // Use f32 for drawing
+
+            // ‼️ --- End of moved section ---
+
+            // --- Load/Draw Waveform ---
             // Step 1: Check cache. If it's not there, load it.
             if !app_state.waveform_cache.contains_key(&selected_key) {
                 warn!("Cache miss for waveform {}. Loading...", selected_key);
@@ -447,14 +582,32 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     // draw_waveform_peaks is from the GuiApi trait
                     push2.display.draw_waveform_peaks(peaks, COLOR_WAVEFORM)?;
                 }
+
+                // ‼️ --- ADDED: Draw Start/Stop Lines ---
+
+                // Calculate X coordinates
+                let start_x = WAVEFORM_X_START + (start_pct * WAVEFORM_WIDTH as f32).round() as i32;
+                let end_x = WAVEFORM_X_START + (end_pct * WAVEFORM_WIDTH as f32).round() as i32;
+
+                // Draw start line
+                Line::new(
+                    Point::new(start_x, WAVEFORM_Y_START),
+                    Point::new(start_x, WAVEFORM_Y_END),
+                )
+                .into_styled(PrimitiveStyle::with_stroke(COLOR_START_LINE, 1))
+                .draw(&mut push2.display)?;
+
+                // Draw end line
+                Line::new(
+                    Point::new(end_x, WAVEFORM_Y_START),
+                    Point::new(end_x, WAVEFORM_Y_END),
+                )
+                .into_styled(PrimitiveStyle::with_stroke(COLOR_STOP_LINE, 1))
+                .draw(&mut push2.display)?;
+                // ‼️ --- End of Added Section ---
             }
 
             // --- Draw Volume Bar (Track 1, Index 0) ---
-            let volume = app_state
-                .playback_volume
-                .get(&selected_key)
-                .cloned()
-                .unwrap_or(1.0);
             // Normalize volume (0.0 - 1.5) to a 0-127 i32 value
             let volume_norm = (volume / 1.5).clamp(0.0, 1.0);
             let volume_val = (volume_norm * 127.0) as i32;
@@ -468,11 +621,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .unwrap();
 
             // --- Draw Pitch Bar (Track 2, Index 1) ---
-            let pitch = app_state
-                .pitch_shift_semitones
-                .get(&selected_key)
-                .cloned()
-                .unwrap_or(0.0);
             // Normalize pitch (+/- PITCH_RANGE) to a 0-127 i32 value
             // Map [-12.0, 12.0] to [0.0, 1.0]
             let pitch_norm =
@@ -486,9 +634,31 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
+
+            // ‼️ --- ADDED: Draw Encoder Bars for Start/Stop ---
+
+            // --- Draw Start Bar (Track 3, Index 2) ---
+            let start_val = (start_pct.clamp(0.0, 1.0) * 127.0) as i32;
+            push2
+                .display
+                .draw_encoder_outline(2, COLOR_ENCODER_OUTLINE)
+                .unwrap();
+            push2
+                .display
+                .draw_encoder_bar(2, start_val, COLOR_START_LINE)
+                .unwrap();
+
+            // --- Draw End Bar (Track 4, Index 3) ---
+            let end_val = (end_pct.clamp(0.0, 1.0) * 127.0) as i32;
+            push2
+                .display
+                .draw_encoder_outline(3, COLOR_ENCODER_OUTLINE)
+                .unwrap();
+            push2
+                .display
+                .draw_encoder_bar(3, end_val, COLOR_STOP_LINE)
+                .unwrap();
         }
-
-
         // -----------------------------------------------------------------
         // 3. FLUSH: Send the frame buffer to the display
         // -----------------------------------------------------------------
