@@ -24,21 +24,13 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
 
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
-// ‼️ --- ADDED IMPORTS --- ‼️
 use embedded_graphics::{pixelcolor::Bgr565, prelude::*};
 use log::{debug, info};
 use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
-// ‼️ --- END ADDED IMPORTS --- ‼️
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
-
-// #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-// enum Mode {
-//     Playback,
-//     Edit,
-// }
 
 struct AppState {
     // mode: Mode,
@@ -62,13 +54,11 @@ const COLOR_PLAYING: u8 = Push2Colors::PINK;
 const COLOR_SELECTED: u8 = Push2Colors::PURPLE;
 const BUTTON_LIGHT_ON: u8 = Push2Colors::GREEN_PALE;
 
-// ‼️ --- ADDED DISPLAY CONSTANTS --- ‼️
 const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
-// ‼️ --- END ADDED DISPLAY CONSTANTS --- ‼️
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
@@ -396,7 +386,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 let current_pitch =
                                     app_state.pitch_shift_semitones.entry(key).or_insert(0.0);
                                 *current_pitch += delta as f64 * 0.1; // 0.1 semitones per tick
-                                // ‼️ --- ADDED CLAMP TO STATE --- ‼️
+
                                 *current_pitch = current_pitch
                                     .clamp(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES);
                                 info!(
@@ -413,7 +403,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         }
 
         // -----------------------------------------------------------------
-        // ‼️ 2. RENDER: Draw the current state to the display buffer
+
         // -----------------------------------------------------------------
 
         // Clear the display buffer to black
@@ -463,7 +453,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         }
 
         // -----------------------------------------------------------------
-        // ‼️ 3. FLUSH: Send the buffer to the physical display
+
         // -----------------------------------------------------------------
         if let Err(e) = push2.display.flush() {
             eprintln!("Failed to flush display: {}", e);
