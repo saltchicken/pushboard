@@ -10,7 +10,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}}; // ‼️ Import Sender
+use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::thread;
 
 const PRE_BUFFER_SECONDS: u32 = 1;
@@ -80,7 +80,7 @@ fn save_recording_from_buffer(
 fn handle_audio_commands(
     rx: Receiver<AudioCommand>,
     data: Arc<Mutex<UserData>>,
-    app_tx: Sender<AppCommand>, // ‼️ Add the sender to the main thread
+    app_tx: Sender<AppCommand>,
 ) {
     // This loop blocks on `rx.recv()`, waiting for commands from the main thread.
     // When the main thread drops its `Sender`, this loop will end.
@@ -134,7 +134,7 @@ fn handle_audio_commands(
 }
 pub fn run_capture_loop(
     rx: Receiver<AudioCommand>,
-    app_tx: Sender<AppCommand>, // ‼️ Accept the sender
+    app_tx: Sender<AppCommand>,
 ) -> Result<(), pw::Error> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -265,7 +265,7 @@ pub fn run_capture_loop(
     // --- End of Stream Setup ---
     let ipc_data = data.clone();
     thread::spawn(move || {
-        handle_audio_commands(rx, ipc_data, app_tx); // ‼️ Pass sender to handler
+        handle_audio_commands(rx, ipc_data, app_tx);
     });
     mainloop.run();
     Ok(())
