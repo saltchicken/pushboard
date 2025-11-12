@@ -10,22 +10,24 @@ use std::convert::TryInto;
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc::Receiver};
+use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}}; // ‼️ Import Sender
 use std::thread;
+
+// ‼️ We need a way to message main thread. Let's use the AppCommand from main.rs
+// ‼️ (We can't define it here, but we'll use the Sender<AppCommand>)
+use super::AppCommand; 
 
 #[derive(Debug, PartialEq, Clone)]
 enum State {
     Listening,
     Recording(PathBuf),
 }
-
 struct UserData {
     format: Option<spa::param::audio::AudioInfoRaw>,
     state: State,
     buffer: VecDeque<f32>,
     pre_buffer_max_samples: usize,
 }
-
 fn save_recording_from_buffer(
     buffer: VecDeque<f32>,
     format: &spa::param::audio::AudioInfoRaw,
@@ -35,7 +37,6 @@ fn save_recording_from_buffer(
         println!("Buffer is empty, not saving.");
         return;
     }
-
     if let Some(parent) = filename.parent()
         && !parent.exists()
         && let Err(e) = fs::create_dir_all(parent)
@@ -43,18 +44,15 @@ fn save_recording_from_buffer(
         eprintln!("Failed to create directory {}: {}", parent.display(), e);
         return;
     }
-
     let spec = WavSpec {
         channels: format.channels() as u16,
         sample_rate: format.rate(),
         bits_per_sample: 32,
         sample_format: SampleFormat::Float,
     };
-
     println!("Saving recording to {}...", filename.display());
     match WavWriter::create(filename, spec) {
         Ok(mut writer) => {
-
             for &sample in &buffer {
                 if let Err(e) = writer.write_sample(sample) {
                     eprintln!("Error writing sample: {}", e);
@@ -77,13 +75,15 @@ fn save_recording_from_buffer(
         }
     }
 }
-
 /// It runs in a separate thread and blocks on the MPSC channel.
-fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>) {
+fn handle_audio_commands(
+    rx: Receiver<AudioCommand>,
+    data: Arc<Mutex<UserData>>,
+    app_tx: Sender<AppCommand>, // ‼️ Add the sender to the main thread
+) {
     // This loop blocks on `rx.recv()`, waiting for commands from the main thread.
     // When the main thread drops its `Sender`, this loop will end.
     for command in rx {
-
         let mut save_data: Option<(VecDeque<f32>, spa::param::audio::AudioInfoRaw, PathBuf)> = None;
         {
             // Scoped MutexGuard
@@ -97,7 +97,6 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
                             State::Listening => {
                                 println!("START recording to {}", path.display());
                                 user_data.state = State::Recording(path);
-
                                 // We keep the pre-buffer!
                             }
                             State::Recording(_) => {
@@ -113,7 +112,6 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
                         let buffer_to_save = std::mem::take(&mut user_data.buffer);
                         let format_to_save = *user_data.format.as_ref().unwrap();
                         save_data = Some((buffer_to_save, format_to_save, save_path));
-
                         // the *next* 3-second pre-buffer.
                     } else {
                         eprintln!("Refused STOP: Not recording.");
@@ -121,29 +119,32 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
                 }
             }
         }
-
         // Save data *outside* the mutex lock
         if let Some((buffer, format, path)) = save_data {
             save_recording_from_buffer(buffer, &format, &path);
+            
+            // ‼️ File is saved! Notify the main thread.
+            if let Err(e) = app_tx.send(AppCommand::FileSaved(path)) {
+                eprintln!("Failed to send FileSaved command to main thread: {}", e);
+            }
         }
     }
     println!("Audio command channel closed. Exiting command loop.");
 }
-
-pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
+pub fn run_capture_loop(
+    rx: Receiver<AudioCommand>,
+    app_tx: Sender<AppCommand>, // ‼️ Accept the sender
+) -> Result<(), pw::Error> {
     pw::init();
-
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
-
     let data = Arc::new(Mutex::new(UserData {
         format: None,
         state: State::Listening,
         buffer: VecDeque::new(),
         pre_buffer_max_samples: 0,
     }));
-
     // --- PipeWire Stream Setup (Unchanged) ---
     let props = properties! {
         *pw::keys::MEDIA_TYPE => "Audio",
@@ -152,7 +153,6 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
         *pw::keys::STREAM_CAPTURE_SINK => "true",
     };
     let stream = pw::stream::StreamBox::new(&core, "audio-capture", props)?;
-
     let _listener = stream
         .add_local_listener_with_user_data(data.clone())
         .param_changed(|_, user_data_arc, id, param| {
@@ -166,24 +166,19 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                 Ok(v) => v,
                 Err(_) => return,
             };
-
             if media_type != MediaType::Audio || media_subtype != MediaSubtype::Raw {
                 return;
             }
-
             let mut user_data = user_data_arc.lock().unwrap();
             let mut info = spa::param::audio::AudioInfoRaw::new();
             info.parse(param)
                 .expect("Failed to parse param changed to AudioInfoRaw");
-
             println!(
                 "capturing rate:{} channels:{}",
                 info.rate(),
                 info.channels()
             );
             user_data.format = Some(info);
-
-
             const PRE_BUFFER_SECONDS: u32 = 3;
             let max_samples = (info.rate() * info.channels() * PRE_BUFFER_SECONDS) as usize;
             println!(
@@ -197,18 +192,14 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
             // 2.0 = +6dB (doubles the volume)
             // 0.5 = -6dB (halves the volume)
             const GAIN_FACTOR: f32 = 2.0;
-
             let mut user_data = user_data_arc.lock().unwrap();
             let Some(_format) = user_data.format.as_ref() else {
                 return;
             };
-
-
             // if user_data.state == State::Listening {
             //     let _ = stream.dequeue_buffer();
             //     return;
             // }
-
             match stream.dequeue_buffer() {
                 None => println!("out of buffers"),
                 Some(mut buffer) => {
@@ -218,7 +209,6 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                     }
                     let data = &mut datas[0];
                     let n_samples = data.chunk().size() / (mem::size_of::<f32>() as u32);
-
                     if let Some(samples) = data.data() {
                         let mut all_samples = Vec::with_capacity(n_samples as usize);
                         for n in 0..(n_samples as usize) {
@@ -229,11 +219,8 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                             let amplified_sample = sample * GAIN_FACTOR;
                             all_samples.push(amplified_sample.clamp(-1.0, 1.0));
                         }
-
-
                         // Always add new samples to the buffer
                         user_data.buffer.extend(&all_samples);
-
                         // If Listening, trim the buffer to maintain the pre-roll window
                         if user_data.state == State::Listening {
                             let max_samples = user_data.pre_buffer_max_samples;
@@ -252,7 +239,6 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
             }
         })
         .register()?;
-
     let mut audio_info = spa::param::audio::AudioInfoRaw::new();
     audio_info.set_format(spa::param::audio::AudioFormat::F32LE);
     let obj = pw::spa::pod::Object {
@@ -268,7 +254,6 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
     .0
     .into_inner();
     let mut params = [Pod::from_bytes(&values).unwrap()];
-
     stream.connect(
         spa::utils::Direction::Input,
         None,
@@ -277,14 +262,11 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
             | pw::stream::StreamFlags::RT_PROCESS,
         &mut params,
     )?;
-
     // --- End of Stream Setup ---
     let ipc_data = data.clone();
     thread::spawn(move || {
-        handle_audio_commands(rx, ipc_data);
+        handle_audio_commands(rx, ipc_data, app_tx); // ‼️ Pass sender to handler
     });
-
     mainloop.run();
-
     Ok(())
 }

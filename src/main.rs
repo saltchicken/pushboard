@@ -8,6 +8,13 @@ pub enum AudioCommand {
     Start(PathBuf),
     Stop,
 }
+
+// ‼️ Define the new command for communication from audio thread -> main thread
+#[derive(Debug)]
+pub enum AppCommand {
+    FileSaved(PathBuf),
+}
+
 pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
     match dirs::audio_dir() {
         Some(mut path) => {
@@ -20,7 +27,6 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
 }
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
-
 use embedded_graphics::{
     pixelcolor::Bgr565,
     prelude::*,
@@ -32,7 +38,6 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
-
 struct AppState {
     // mode: Mode,
     pad_files: HashMap<u8, PathBuf>,
@@ -46,7 +51,6 @@ struct AppState {
     is_delete_held: bool,
     is_select_held: bool,
     waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
-
     sample_start_point: HashMap<u8, f64>,
     sample_end_point: HashMap<u8, f64>,
 }
@@ -61,28 +65,26 @@ const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
 const COLOR_WAVEFORM: Bgr565 = Bgr565::CYAN;
-
 const COLOR_START_LINE: Bgr565 = Bgr565::GREEN;
 const COLOR_STOP_LINE: Bgr565 = Bgr565::RED;
-
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
-
-
 // --- Waveform Display Constants ---
 const WAVEFORM_Y_START: i32 = 0; // Top of display
 const WAVEFORM_Y_END: i32 = 160; // Bottom of display
 const WAVEFORM_X_START: i32 = 0;
 const WAVEFORM_X_END: i32 = 960; // Full width of display
 const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
     let (audio_tx, audio_rx) = mpsc::channel();
+    let (app_tx, app_rx) = mpsc::channel::<AppCommand>(); // ‼️ Create the new channel
+
     std::thread::spawn(move || {
         println!("Audio capture thread started...");
-        if let Err(e) = audio_capture::run_capture_loop(audio_rx) {
+        // ‼️ Pass the app_tx sender to the audio thread
+        if let Err(e) = audio_capture::run_capture_loop(audio_rx, app_tx) {
             eprintln!("Audio capture thread failed: {}", e);
         } else {
             println!("Audio capture thread exited cleanly.");
@@ -105,7 +107,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         is_delete_held: false,
         is_select_held: false,
         waveform_cache: HashMap::new(),
-
         sample_start_point: HashMap::new(),
         sample_end_point: HashMap::new(),
     };
@@ -165,10 +166,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.pitch_shift_semitones.remove(&address);
                                 app_state.playback_volume.remove(&address);
                                 app_state.waveform_cache.remove(&address);
-
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
-
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -227,7 +226,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
-
                     // If Select or Delete is held, we just reset the pad color
                     // (the action happened on press)
                     if app_state.is_delete_held || app_state.is_select_held {
@@ -242,33 +240,42 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         }
                         continue;
                     }
-
                     if app_state.active_recording_key == Some(address) {
-                        // This was a recording, stop it
+                        // ‼️ This was a recording, stop it
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
                             eprintln!("Failed to send STOP command: {}", e);
                         }
                         app_state.active_recording_key = None;
+                        
+                        // ‼️ We DON'T select it here. We just set its color to blue.
+                        // ‼️ The main loop will select it when it gets the FileSaved message.
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
-                        // Invalidate waveform cache so it re-loads
-                        app_state.waveform_cache.remove(&address);
+                        
                     } else if path.exists() {
                         // This was a playback trigger
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
-
                         // --- Playback and Selection Logic ---
                         // Store the previously selected key
                         let prev_selected_key = app_state.selected_for_edit;
                         // Set the new pad as selected
                         app_state.selected_for_edit = Some(address);
+
                         // If a *different* pad was selected before, reset its color
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
                                 if let Some(old_coord) = push2.button_map.get_note(prev_key) {
-                                    // Reset old pad's color. We assume it has a file
-                                    // because it was selectable.
-                                    push2.set_pad_color(old_coord, COLOR_HAS_FILE)?;
+                                    // Reset old pad's color (check if file exists)
+                                    let old_color = if app_state
+                                        .pad_files
+                                        .get(&prev_key)
+                                        .map_or(false, |p| p.exists())
+                                    {
+                                        COLOR_HAS_FILE
+                                    } else {
+                                        COLOR_OFF
+                                    };
+                                    push2.set_pad_color(old_coord, old_color)?;
                                 }
                             }
                         }
@@ -279,8 +286,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(0.0);
-
-
                         let start_point = app_state
                             .sample_start_point
                             .get(&address)
@@ -291,7 +296,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-
                         let path_clone = path.clone();
                         let sink_clone =
                             match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
@@ -309,17 +313,13 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-
                         // Spawn the playback task
                         tokio::spawn(async move {
                             let mut temp_path: Option<PathBuf> = None;
-
-
                             // (pitched AND trimmed)
                             let path_to_play = {
                                 let path_for_blocking = path_clone.clone();
                                 match tokio::task::spawn_blocking(move || {
-
                                     audio_processor::create_processed_copy_sync(
                                         &path_for_blocking,
                                         pitch_shift,
@@ -346,7 +346,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     }
                                 }
                             };
-
                             if let Err(e) = audio_player::play_audio_file(
                                 &path_to_play,
                                 sink_clone,
@@ -356,7 +355,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             {
                                 eprintln!("Playback failed: {}", e);
                             }
-
                             // Clean up the temporary file
                             if let Some(p) = temp_path {
                                 if let Err(e) = tokio_fs::remove_file(&p).await {
@@ -436,7 +434,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     } else {
                         raw_delta as i32
                     };
-
                     match name {
                         EncoderName::Track1 => {
                             // Volume Control
@@ -465,7 +462,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 );
                             }
                         }
-
                         EncoderName::Track3 => {
                             // Start Point Control
                             if let Some(key) = app_state.selected_for_edit {
@@ -506,53 +502,98 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 _ => {}
             }
         }
+        
+        // ‼️ -----------------------------------------------------------------
+        // ‼️ 1.5. APP EVENTS: Handle events from other threads (e.g., audio)
+        // ‼️ -----------------------------------------------------------------
+        while let Ok(app_event) = app_rx.try_recv() {
+            match app_event {
+                AppCommand::FileSaved(path) => {
+                    info!("Main thread notified that {} was saved.", path.display());
+                    
+                    // Find the pad address associated with this path
+                    let mut found_address = None;
+                    for (addr, pad_path) in &app_state.pad_files {
+                        if *pad_path == path {
+                            found_address = Some(*addr);
+                            break;
+                        }
+                    }
+
+                    if let Some(address) = found_address {
+                        // ‼️ Invalidate cache so it re-loads the new waveform
+                        app_state.waveform_cache.remove(&address);
+
+                        // ‼️ --- This is the selection logic, moved here ---
+                        let prev_selected_key = app_state.selected_for_edit;
+                        app_state.selected_for_edit = Some(address);
+
+                        // ‼️ Deselect old pad
+                        if let Some(prev_key) = prev_selected_key {
+                            if prev_key != address {
+                                if let Some(old_coord) = push2.button_map.get_note(prev_key) {
+                                    let old_color = if app_state.pad_files.get(&prev_key).map_or(false, |p| p.exists()) {
+                                        COLOR_HAS_FILE
+                                    } else {
+                                        COLOR_OFF
+                                    };
+                                    // Don't panic on error, just log (or ignore)
+                                    let _ = push2.set_pad_color(old_coord, old_color);
+                                }
+                            }
+                        }
+                        
+                        // ‼️ Set the *new* pad's color to SELECTED
+                        if let Some(coord) = push2.button_map.get_note(address) {
+                            let _ = push2.set_pad_color(coord, COLOR_SELECTED);
+                        }
+                    } else {
+                        warn!("FileSaved event received for a path not in pad_files: {}", path.display());
+                    }
+                }
+            }
+        }
+
         // -----------------------------------------------------------------
         // 2. GUI DRAWING: Render the display
         // -----------------------------------------------------------------
         // Clear the display buffer to black
         push2.display.clear(Bgr565::BLACK).unwrap(); // Infallible
-
         // Draw waveform AND encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
-
             // This fixes the scope errors from before.
-
             // Get Volume (for Encoder 1)
             let volume = app_state
                 .playback_volume
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(1.0);
-
             // Get Pitch (for Encoder 2)
             let pitch = app_state
                 .pitch_shift_semitones
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(0.0);
-
             // Get Start Point (for Encoder 3)
             let start_pct = app_state
                 .sample_start_point
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(0.0) as f32; // Use f32 for drawing
-
             // Get End Point (for Encoder 4)
             let end_pct = app_state
                 .sample_end_point
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(1.0) as f32; // Use f32 for drawing
-
-
-
             // --- Load/Draw Waveform ---
             // Step 1: Check cache. If it's not there, load it.
             if !app_state.waveform_cache.contains_key(&selected_key) {
                 warn!("Cache miss for waveform {}. Loading...", selected_key);
                 let mut loaded_peaks: Option<Vec<(f32, f32)>> = None;
                 if let Some(path) = app_state.pad_files.get(&selected_key) {
+                    
+                    // ‼️ This check will now SUCCEED because we waited for FileSaved
                     if path.exists() {
                         // This is a blocking call! It will pause the main loop
                         // briefly on the first load of a sample.
@@ -569,26 +610,23 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                     } else {
+                        // ‼️ This should no longer happen for new recordings
+                        warn!("...Path {} does not exist, caching None.", path.display());
                         // File doesn't exist, cache None
                         loaded_peaks = None;
                     }
                 }
                 app_state.waveform_cache.insert(selected_key, loaded_peaks);
             }
-
             // Step 2: Draw the cached waveform (if it loaded successfully)
             if let Some(Some(peaks)) = app_state.waveform_cache.get(&selected_key) {
                 if !peaks.is_empty() {
                     // draw_waveform_peaks is from the GuiApi trait
                     push2.display.draw_waveform_peaks(peaks, COLOR_WAVEFORM)?;
                 }
-
-
-
                 // Calculate X coordinates
                 let start_x = WAVEFORM_X_START + (start_pct * WAVEFORM_WIDTH as f32).round() as i32;
                 let end_x = WAVEFORM_X_START + (end_pct * WAVEFORM_WIDTH as f32).round() as i32;
-
                 // Draw start line
                 Line::new(
                     Point::new(start_x, WAVEFORM_Y_START),
@@ -596,7 +634,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 )
                 .into_styled(PrimitiveStyle::with_stroke(COLOR_START_LINE, 1))
                 .draw(&mut push2.display)?;
-
                 // Draw end line
                 Line::new(
                     Point::new(end_x, WAVEFORM_Y_START),
@@ -604,9 +641,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 )
                 .into_styled(PrimitiveStyle::with_stroke(COLOR_STOP_LINE, 1))
                 .draw(&mut push2.display)?;
-
             }
-
             // --- Draw Volume Bar (Track 1, Index 0) ---
             // Normalize volume (0.0 - 1.5) to a 0-127 i32 value
             let volume_norm = (volume / 1.5).clamp(0.0, 1.0);
@@ -619,7 +654,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(0, volume_val, COLOR_VOLUME_BAR)
                 .unwrap();
-
             // --- Draw Pitch Bar (Track 2, Index 1) ---
             // Normalize pitch (+/- PITCH_RANGE) to a 0-127 i32 value
             // Map [-12.0, 12.0] to [0.0, 1.0]
@@ -634,9 +668,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
-
-
-
             // --- Draw Start Bar (Track 3, Index 2) ---
             let start_val = (start_pct.clamp(0.0, 1.0) * 127.0) as i32;
             push2
@@ -647,7 +678,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(2, start_val, COLOR_START_LINE)
                 .unwrap();
-
             // --- Draw End Bar (Track 4, Index 3) ---
             let end_val = (end_pct.clamp(0.0, 1.0) * 127.0) as i32;
             push2
