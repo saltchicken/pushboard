@@ -20,11 +20,11 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
 }
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
-// ‼️ MODIFIED: Added imports for drawing lines
+
 use embedded_graphics::{
     pixelcolor::Bgr565,
     prelude::*,
-    primitives::{Line, Primitive, PrimitiveStyle}, // ‼️ ADDED
+    primitives::{Line, Primitive, PrimitiveStyle},
 };
 use log::{debug, info, warn};
 use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
@@ -46,7 +46,7 @@ struct AppState {
     is_delete_held: bool,
     is_select_held: bool,
     waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
-    // ‼️ ADDED: State for sample start/end points (normalized 0.0 to 1.0)
+
     sample_start_point: HashMap<u8, f64>,
     sample_end_point: HashMap<u8, f64>,
 }
@@ -61,14 +61,14 @@ const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
 const COLOR_WAVEFORM: Bgr565 = Bgr565::CYAN;
-// ‼️ ADDED: Colors for the new start/stop lines and bars
+
 const COLOR_START_LINE: Bgr565 = Bgr565::GREEN;
 const COLOR_STOP_LINE: Bgr565 = Bgr565::RED;
 
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
 
-// ‼️ ADDED: Constants for waveform drawing area
+
 // --- Waveform Display Constants ---
 const WAVEFORM_Y_START: i32 = 0; // Top of display
 const WAVEFORM_Y_END: i32 = 160; // Bottom of display
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         is_delete_held: false,
         is_select_held: false,
         waveform_cache: HashMap::new(),
-        // ‼️ ADDED: Initialize new state hashmaps
+
         sample_start_point: HashMap::new(),
         sample_end_point: HashMap::new(),
     };
@@ -165,7 +165,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.pitch_shift_semitones.remove(&address);
                                 app_state.playback_volume.remove(&address);
                                 app_state.waveform_cache.remove(&address);
-                                // ‼️ ADDED: Clear start/stop points on delete
+
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
 
@@ -280,7 +280,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .cloned()
                             .unwrap_or(0.0);
 
-                        // ‼️ ADDED: Get start/end points for playback
+
                         let start_point = app_state
                             .sample_start_point
                             .get(&address)
@@ -314,12 +314,12 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         tokio::spawn(async move {
                             let mut temp_path: Option<PathBuf> = None;
 
-                            // ‼️ MODIFIED: This block now creates a processed copy
+
                             // (pitched AND trimmed)
                             let path_to_play = {
                                 let path_for_blocking = path_clone.clone();
                                 match tokio::task::spawn_blocking(move || {
-                                    // ‼️ RENAMED function and passed new args
+
                                     audio_processor::create_processed_copy_sync(
                                         &path_for_blocking,
                                         pitch_shift,
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                         path_clone
                                     }
                                 }
-                            }; // ‼️ End of `path_to_play` block
+                            };
 
                             if let Err(e) = audio_player::play_audio_file(
                                 &path_to_play,
@@ -465,7 +465,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 );
                             }
                         }
-                        // ‼️ ADDED: Handle Encoders 3 and 4
+
                         EncoderName::Track3 => {
                             // Start Point Control
                             if let Some(key) = app_state.selected_for_edit {
@@ -514,7 +514,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
         // Draw waveform AND encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
-            // ‼️ --- MOVED all parameter definitions to the top of the block ---
+
             // This fixes the scope errors from before.
 
             // Get Volume (for Encoder 1)
@@ -545,7 +545,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .cloned()
                 .unwrap_or(1.0) as f32; // Use f32 for drawing
 
-            // ‼️ --- End of moved section ---
+
 
             // --- Load/Draw Waveform ---
             // Step 1: Check cache. If it's not there, load it.
@@ -583,7 +583,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     push2.display.draw_waveform_peaks(peaks, COLOR_WAVEFORM)?;
                 }
 
-                // ‼️ --- ADDED: Draw Start/Stop Lines ---
+
 
                 // Calculate X coordinates
                 let start_x = WAVEFORM_X_START + (start_pct * WAVEFORM_WIDTH as f32).round() as i32;
@@ -604,7 +604,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 )
                 .into_styled(PrimitiveStyle::with_stroke(COLOR_STOP_LINE, 1))
                 .draw(&mut push2.display)?;
-                // ‼️ --- End of Added Section ---
+
             }
 
             // --- Draw Volume Bar (Track 1, Index 0) ---
@@ -635,7 +635,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
 
-            // ‼️ --- ADDED: Draw Encoder Bars for Start/Stop ---
+
 
             // --- Draw Start Bar (Track 3, Index 2) ---
             let start_val = (start_pct.clamp(0.0, 1.0) * 127.0) as i32;

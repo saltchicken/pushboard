@@ -5,7 +5,7 @@ use pw::{properties::properties, spa};
 use spa::param::format::{MediaSubtype, MediaType};
 use spa::param::format_utils;
 use spa::pod::Pod;
-use std::collections::VecDeque; // ‼️ ADDED: Import VecDeque
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::fs;
 use std::mem;
@@ -22,12 +22,12 @@ enum State {
 struct UserData {
     format: Option<spa::param::audio::AudioInfoRaw>,
     state: State,
-    buffer: VecDeque<f32>,         // ‼️ CHANGED: from Vec<f32> to VecDeque<f32>
-    pre_buffer_max_samples: usize, // ‼️ ADDED: To store the size for 3 seconds
+    buffer: VecDeque<f32>,
+    pre_buffer_max_samples: usize,
 }
 
 fn save_recording_from_buffer(
-    buffer: VecDeque<f32>, // ‼️ CHANGED: from Vec<f32> to VecDeque<f32>
+    buffer: VecDeque<f32>,
     format: &spa::param::audio::AudioInfoRaw,
     filename: &Path,
 ) {
@@ -54,7 +54,7 @@ fn save_recording_from_buffer(
     println!("Saving recording to {}...", filename.display());
     match WavWriter::create(filename, spec) {
         Ok(mut writer) => {
-            // ‼️ This loop works fine on a &VecDeque
+
             for &sample in &buffer {
                 if let Err(e) = writer.write_sample(sample) {
                     eprintln!("Error writing sample: {}", e);
@@ -83,7 +83,7 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
     // This loop blocks on `rx.recv()`, waiting for commands from the main thread.
     // When the main thread drops its `Sender`, this loop will end.
     for command in rx {
-        // ‼️ CHANGED: Type to hold VecDeque
+
         let mut save_data: Option<(VecDeque<f32>, spa::param::audio::AudioInfoRaw, PathBuf)> = None;
         {
             // Scoped MutexGuard
@@ -97,7 +97,7 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
                             State::Listening => {
                                 println!("START recording to {}", path.display());
                                 user_data.state = State::Recording(path);
-                                // ‼️ REMOVED: user_data.buffer.clear();
+
                                 // We keep the pre-buffer!
                             }
                             State::Recording(_) => {
@@ -113,7 +113,7 @@ fn handle_audio_commands(rx: Receiver<AudioCommand>, data: Arc<Mutex<UserData>>)
                         let buffer_to_save = std::mem::take(&mut user_data.buffer);
                         let format_to_save = *user_data.format.as_ref().unwrap();
                         save_data = Some((buffer_to_save, format_to_save, save_path));
-                        // ‼️ The buffer is now empty, and will start collecting
+
                         // the *next* 3-second pre-buffer.
                     } else {
                         eprintln!("Refused STOP: Not recording.");
@@ -140,8 +140,8 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
     let data = Arc::new(Mutex::new(UserData {
         format: None,
         state: State::Listening,
-        buffer: VecDeque::new(),   // ‼️ CHANGED: Initialize VecDeque
-        pre_buffer_max_samples: 0, // ‼️ ADDED: Initialize max samples
+        buffer: VecDeque::new(),
+        pre_buffer_max_samples: 0,
     }));
 
     // --- PipeWire Stream Setup (Unchanged) ---
@@ -183,7 +183,7 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
             );
             user_data.format = Some(info);
 
-            // ‼️ ADDED: Calculate and store the pre-buffer size
+
             const PRE_BUFFER_SECONDS: u32 = 3;
             let max_samples = (info.rate() * info.channels() * PRE_BUFFER_SECONDS) as usize;
             println!(
@@ -203,7 +203,7 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                 return;
             };
 
-            // ‼️ REMOVED: Early return when Listening. We now buffer always.
+
             // if user_data.state == State::Listening {
             //     let _ = stream.dequeue_buffer();
             //     return;
@@ -230,7 +230,7 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                             all_samples.push(amplified_sample.clamp(-1.0, 1.0));
                         }
 
-                        // ‼️ MODIFIED: This logic block is new
+
                         // Always add new samples to the buffer
                         user_data.buffer.extend(&all_samples);
 
