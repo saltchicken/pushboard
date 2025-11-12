@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}}; // ‼️ Import Sender
 use std::thread;
 
-// ‼️ We need a way to message main thread. Let's use the AppCommand from main.rs
-// ‼️ (We can't define it here, but we'll use the Sender<AppCommand>)
+const PRE_BUFFER_SECONDS: u32 = 1;
+
+
 use super::AppCommand; 
 
 #[derive(Debug, PartialEq, Clone)]
@@ -179,7 +180,6 @@ pub fn run_capture_loop(
                 info.channels()
             );
             user_data.format = Some(info);
-            const PRE_BUFFER_SECONDS: u32 = 3;
             let max_samples = (info.rate() * info.channels() * PRE_BUFFER_SECONDS) as usize;
             println!(
                 "Setting pre-buffer size to {} samples ({} seconds)",
