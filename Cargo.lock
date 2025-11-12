@@ -1353,6 +1353,7 @@ dependencies = [
  "dirs",
  "embedded-graphics",
  "embedded-graphics-core",
+ "hound",
  "log",
  "midir",
  "ron",

@@ -21,7 +21,7 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
 use embedded_graphics::{pixelcolor::Bgr565, prelude::*};
-use log::{debug, info};
+use log::{debug, info, warn};
 use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -39,6 +39,7 @@ struct AppState {
     audio_cmd_tx: mpsc::Sender<AudioCommand>,
     is_delete_held: bool,
     is_select_held: bool,
+    waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
 }
 // --- Color Constants for different states ---
 const COLOR_OFF: u8 = Push2Colors::BLACK;
@@ -50,6 +51,7 @@ const BUTTON_LIGHT_ON: u8 = Push2Colors::GREEN_PALE;
 const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
+const COLOR_WAVEFORM: Bgr565 = Bgr565::CYAN;
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
 #[tokio::main]
@@ -80,6 +82,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         audio_cmd_tx: audio_tx,
         is_delete_held: false,
         is_select_held: false,
+        waveform_cache: HashMap::new(),
     };
     info!("\nConnection open. Soundboard example running.");
     info!(
@@ -136,6 +139,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 });
                                 app_state.pitch_shift_semitones.remove(&address);
                                 app_state.playback_volume.remove(&address);
+                                app_state.waveform_cache.remove(&address);
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -207,16 +211,16 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         }
                         app_state.active_recording_key = None;
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
+
+
+                        app_state.waveform_cache.remove(&address);
                     } else if path.exists() {
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
 
-                        // ‼️ --- START CHANGE: Auto-select pad on playback ---
                         // Store the previously selected key
                         let prev_selected_key = app_state.selected_for_edit;
-
                         // Set the new pad as selected
                         app_state.selected_for_edit = Some(address);
-
                         // If a *different* pad was selected before, reset its color
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
@@ -227,7 +231,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 }
                             }
                         }
-                        // ‼️ --- END CHANGE ---
 
                         let pitch_shift = app_state
                             .pitch_shift_semitones
@@ -302,9 +305,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         });
 
-                        // ‼️ Set color to SELECTED, not HAS_FILE
-                        // push2.set_pad_color(coord, COLOR_HAS_FILE)?; // OLD
-                        push2.set_pad_color(coord, COLOR_SELECTED)?; // NEW
+                        push2.set_pad_color(coord, COLOR_SELECTED)?;
                     } else {
                         push2.set_pad_color(coord, COLOR_OFF)?;
                     }
@@ -402,11 +403,52 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             }
         }
         // -----------------------------------------------------------------
+        // 2. GUI DRAWING: Render the display
         // -----------------------------------------------------------------
         // Clear the display buffer to black
         push2.display.clear(Bgr565::BLACK).unwrap(); // Infallible
-        // Draw encoder bars only if a pad is selected
+
+
+        // Draw waveform AND encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
+            // --- Load/Draw Waveform ---
+
+            // Step 1: Check cache. If it's not there, load it.
+            if !app_state.waveform_cache.contains_key(&selected_key) {
+                warn!("Cache miss for waveform {}. Loading...", selected_key);
+                let mut loaded_peaks: Option<Vec<(f32, f32)>> = None;
+                if let Some(path) = app_state.pad_files.get(&selected_key) {
+                    if path.exists() {
+                        // This is a blocking call! It will pause the main loop
+                        // briefly on the first load of a sample.
+                        match push2::gui::load_waveform_peaks(path, 960) {
+                            // 960 = display width
+                            Ok(peaks) => {
+                                info!("...Successfully loaded waveform.");
+                                loaded_peaks = Some(peaks);
+                            }
+                            Err(e) => {
+                                warn!("Failed to load waveform for {}: {}", path.display(), e);
+                                // Insert None to mark as "failed" and avoid retrying
+                                loaded_peaks = None;
+                            }
+                        }
+                    } else {
+                        // File doesn't exist, cache None
+                        loaded_peaks = None;
+                    }
+                }
+                app_state.waveform_cache.insert(selected_key, loaded_peaks);
+            }
+
+            // Step 2: Draw the cached waveform (if it loaded successfully)
+            if let Some(Some(peaks)) = app_state.waveform_cache.get(&selected_key) {
+                if !peaks.is_empty() {
+                    // draw_waveform_peaks is from the GuiApi trait
+                    push2.display.draw_waveform_peaks(peaks, COLOR_WAVEFORM)?;
+                }
+            }
+
             // --- Draw Volume Bar (Track 1, Index 0) ---
             let volume = app_state
                 .playback_volume
@@ -424,6 +466,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(0, volume_val, COLOR_VOLUME_BAR)
                 .unwrap();
+
             // --- Draw Pitch Bar (Track 2, Index 1) ---
             let pitch = app_state
                 .pitch_shift_semitones
@@ -444,7 +487,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
         }
+
+
         // -----------------------------------------------------------------
+        // 3. FLUSH: Send the frame buffer to the display
         // -----------------------------------------------------------------
         if let Err(e) = push2.display.flush() {
             eprintln!("Failed to flush display: {}", e);
@@ -458,4 +504,3 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     Ok(())
 }
-
