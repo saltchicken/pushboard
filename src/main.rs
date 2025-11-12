@@ -1,16 +1,13 @@
 pub mod audio_capture;
 pub mod audio_player;
 pub mod audio_processor;
-
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AudioCommand {
     Start(PathBuf),
     Stop,
 }
-
 pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
     match dirs::audio_dir() {
         Some(mut path) => {
@@ -21,7 +18,6 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
         None => Err(std::io::Error::other("Could not find audio directory")),
     }
 }
-
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
 use embedded_graphics::{pixelcolor::Bgr565, prelude::*};
@@ -31,7 +27,6 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
-
 struct AppState {
     // mode: Mode,
     pad_files: HashMap<u8, PathBuf>,
@@ -45,7 +40,6 @@ struct AppState {
     is_delete_held: bool,
     is_select_held: bool,
 }
-
 // --- Color Constants for different states ---
 const COLOR_OFF: u8 = Push2Colors::BLACK;
 const COLOR_HAS_FILE: u8 = Push2Colors::BLUE_SKY;
@@ -53,13 +47,11 @@ const COLOR_RECORDING: u8 = Push2Colors::RED;
 const COLOR_PLAYING: u8 = Push2Colors::PINK;
 const COLOR_SELECTED: u8 = Push2Colors::PURPLE;
 const BUTTON_LIGHT_ON: u8 = Push2Colors::GREEN_PALE;
-
 const COLOR_VOLUME_BAR: Bgr565 = Bgr565::GREEN;
 const COLOR_PITCH_BAR: Bgr565 = Bgr565::MAGENTA;
 const COLOR_ENCODER_OUTLINE: Bgr565 = Bgr565::WHITE;
 /// The display range for pitch, e.g., +/- 12 semitones.
 const PITCH_RANGE_SEMITONES: f64 = 12.0;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
@@ -72,12 +64,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             println!("Audio capture thread exited cleanly.");
         }
     });
-
     // --- Config Loading ---
     let mut push2 = Push2::new()?;
     let audio_storage_path = get_audio_storage_path()?;
     println!("Audio storage path: {}", audio_storage_path.display());
-
     let mut app_state = AppState {
         // mode: Mode::Playback,
         pad_files: HashMap::new(),
@@ -91,13 +81,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         is_delete_held: false,
         is_select_held: false,
     };
-
     info!("\nConnection open. Soundboard example running.");
     info!(
         "Mute: {} | Solo: {}",
         app_state.is_mute_enabled, app_state.is_solo_enabled
     );
-
     for y in 0..8 {
         for x in 0..8 {
             let coord = PadCoord { x, y };
@@ -113,7 +101,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             push2.set_pad_color(coord, color)?;
         }
     }
-
     // --- Main Loop ---
     loop {
         // -----------------------------------------------------------------
@@ -129,7 +116,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
-
                     if app_state.is_delete_held {
                         info!("Delete held. Deleting sample on pad press.");
                         if let Some(path_buf) = app_state.pad_files.get(&address).cloned() {
@@ -201,7 +187,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
-
                     if app_state.is_delete_held || app_state.is_select_held {
                         // Reset color if it was a 'select' action, otherwise do nothing
                         if app_state.is_select_held {
@@ -215,7 +200,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         }
                         continue;
                     }
-
                     if app_state.active_recording_key == Some(address) {
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
@@ -225,6 +209,26 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
                     } else if path.exists() {
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
+
+                        // ‼️ --- START CHANGE: Auto-select pad on playback ---
+                        // Store the previously selected key
+                        let prev_selected_key = app_state.selected_for_edit;
+
+                        // Set the new pad as selected
+                        app_state.selected_for_edit = Some(address);
+
+                        // If a *different* pad was selected before, reset its color
+                        if let Some(prev_key) = prev_selected_key {
+                            if prev_key != address {
+                                if let Some(old_coord) = push2.button_map.get_note(prev_key) {
+                                    // Reset old pad's color. We assume it has a file
+                                    // because it was selectable.
+                                    push2.set_pad_color(old_coord, COLOR_HAS_FILE)?;
+                                }
+                            }
+                        }
+                        // ‼️ --- END CHANGE ---
+
                         let pitch_shift = app_state
                             .pitch_shift_semitones
                             .get(&address)
@@ -247,7 +251,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-
                         tokio::spawn(async move {
                             let mut temp_path: Option<PathBuf> = None;
                             let path_to_play = if pitch_shift.abs() > 0.01 {
@@ -279,7 +282,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             } else {
                                 path_clone
                             };
-
                             if let Err(e) = audio_player::play_audio_file(
                                 &path_to_play,
                                 sink_clone,
@@ -289,7 +291,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             {
                                 eprintln!("Playback failed: {}", e);
                             }
-
                             if let Some(p) = temp_path {
                                 if let Err(e) = tokio_fs::remove_file(&p).await {
                                     eprintln!(
@@ -301,7 +302,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         });
 
-                        push2.set_pad_color(coord, COLOR_HAS_FILE)?;
+                        // ‼️ Set color to SELECTED, not HAS_FILE
+                        // push2.set_pad_color(coord, COLOR_HAS_FILE)?; // OLD
+                        push2.set_pad_color(coord, COLOR_SELECTED)?; // NEW
                     } else {
                         push2.set_pad_color(coord, COLOR_OFF)?;
                     }
@@ -352,7 +355,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     if name == ControlName::Select {
                         app_state.is_select_held = false;
                     }
-
                     let is_mute_on = name == ControlName::Mute && app_state.is_mute_enabled;
                     let is_solo_on = name == ControlName::Solo && app_state.is_solo_enabled;
                     if !is_mute_on && !is_solo_on {
@@ -367,7 +369,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     } else {
                         raw_delta as i32
                     };
-
                     match name {
                         EncoderName::Track1 => {
                             if let Some(key) = app_state.selected_for_edit {
@@ -386,7 +387,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 let current_pitch =
                                     app_state.pitch_shift_semitones.entry(key).or_insert(0.0);
                                 *current_pitch += delta as f64 * 0.1; // 0.1 semitones per tick
-
                                 *current_pitch = current_pitch
                                     .clamp(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES);
                                 info!(
@@ -401,14 +401,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 _ => {}
             }
         }
-
         // -----------------------------------------------------------------
-
         // -----------------------------------------------------------------
-
         // Clear the display buffer to black
         push2.display.clear(Bgr565::BLACK).unwrap(); // Infallible
-
         // Draw encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
             // --- Draw Volume Bar (Track 1, Index 0) ---
@@ -420,7 +416,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             // Normalize volume (0.0 - 1.5) to a 0-127 i32 value
             let volume_norm = (volume / 1.5).clamp(0.0, 1.0);
             let volume_val = (volume_norm * 127.0) as i32;
-
             push2
                 .display
                 .draw_encoder_outline(0, COLOR_ENCODER_OUTLINE)
@@ -429,7 +424,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(0, volume_val, COLOR_VOLUME_BAR)
                 .unwrap();
-
             // --- Draw Pitch Bar (Track 2, Index 1) ---
             let pitch = app_state
                 .pitch_shift_semitones
@@ -441,7 +435,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             let pitch_norm =
                 ((pitch + PITCH_RANGE_SEMITONES) / (PITCH_RANGE_SEMITONES * 2.0)).clamp(0.0, 1.0);
             let pitch_val = (pitch_norm * 127.0) as i32;
-
             push2
                 .display
                 .draw_encoder_outline(1, COLOR_ENCODER_OUTLINE)
@@ -451,21 +444,18 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
         }
-
         // -----------------------------------------------------------------
-
         // -----------------------------------------------------------------
         if let Err(e) = push2.display.flush() {
             eprintln!("Failed to flush display: {}", e);
             // On a display error, we might want to break the loop
             break;
         }
-
         // -----------------------------------------------------------------
         // 4. SLEEP: Maintain a steady frame rate
         // -----------------------------------------------------------------
         tokio::time::sleep(time::Duration::from_millis(1000 / 60)).await;
     }
-
     Ok(())
 }
+
