@@ -1,5 +1,3 @@
-
-
 use super::AudioCommand;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use pipewire as pw;
@@ -166,6 +164,10 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
             user_data.format = Some(info);
         })
         .process(|stream, user_data_arc| {
+            // 1.0 = no change
+            // 2.0 = +6dB (doubles the volume)
+            // 0.5 = -6dB (halves the volume)
+            const GAIN_FACTOR: f32 = 2.0;
             let mut user_data = user_data_arc.lock().unwrap();
             let Some(_format) = user_data.format.as_ref() else {
                 return;
@@ -189,7 +191,10 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
                             let start = n * mem::size_of::<f32>();
                             let end = start + mem::size_of::<f32>();
                             let chan = &samples[start..end];
-                            all_samples.push(f32::from_le_bytes(chan.try_into().unwrap()));
+
+                            let sample = f32::from_le_bytes(chan.try_into().unwrap());
+                            let amplified_sample = sample * GAIN_FACTOR;
+                            all_samples.push(amplified_sample.clamp(-1.0, 1.0));
                         }
                         if let State::Recording(_) = user_data.state {
                             user_data.buffer.extend_from_slice(&all_samples);
@@ -230,3 +235,4 @@ pub fn run_capture_loop(rx: Receiver<AudioCommand>) -> Result<(), pw::Error> {
     mainloop.run();
     Ok(())
 }
+
