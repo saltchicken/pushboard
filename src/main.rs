@@ -9,7 +9,7 @@ pub enum AudioCommand {
     Stop,
 }
 
-// ‼️ Define the new command for communication from audio thread -> main thread
+
 #[derive(Debug)]
 pub enum AppCommand {
     FileSaved(PathBuf),
@@ -79,11 +79,11 @@ const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
     let (audio_tx, audio_rx) = mpsc::channel();
-    let (app_tx, app_rx) = mpsc::channel::<AppCommand>(); // ‼️ Create the new channel
+    let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
 
     std::thread::spawn(move || {
         println!("Audio capture thread started...");
-        // ‼️ Pass the app_tx sender to the audio thread
+
         if let Err(e) = audio_capture::run_capture_loop(audio_rx, app_tx) {
             eprintln!("Audio capture thread failed: {}", e);
         } else {
@@ -241,15 +241,15 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         continue;
                     }
                     if app_state.active_recording_key == Some(address) {
-                        // ‼️ This was a recording, stop it
+
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
                             eprintln!("Failed to send STOP command: {}", e);
                         }
                         app_state.active_recording_key = None;
                         
-                        // ‼️ We DON'T select it here. We just set its color to blue.
-                        // ‼️ The main loop will select it when it gets the FileSaved message.
+
+
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
                         
                     } else if path.exists() {
@@ -503,9 +503,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             }
         }
         
-        // ‼️ -----------------------------------------------------------------
-        // ‼️ 1.5. APP EVENTS: Handle events from other threads (e.g., audio)
-        // ‼️ -----------------------------------------------------------------
+
+
+
         while let Ok(app_event) = app_rx.try_recv() {
             match app_event {
                 AppCommand::FileSaved(path) => {
@@ -521,14 +521,14 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     }
 
                     if let Some(address) = found_address {
-                        // ‼️ Invalidate cache so it re-loads the new waveform
+
                         app_state.waveform_cache.remove(&address);
 
-                        // ‼️ --- This is the selection logic, moved here ---
+
                         let prev_selected_key = app_state.selected_for_edit;
                         app_state.selected_for_edit = Some(address);
 
-                        // ‼️ Deselect old pad
+
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
                                 if let Some(old_coord) = push2.button_map.get_note(prev_key) {
@@ -543,7 +543,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                         
-                        // ‼️ Set the *new* pad's color to SELECTED
+
                         if let Some(coord) = push2.button_map.get_note(address) {
                             let _ = push2.set_pad_color(coord, COLOR_SELECTED);
                         }
@@ -593,7 +593,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 let mut loaded_peaks: Option<Vec<(f32, f32)>> = None;
                 if let Some(path) = app_state.pad_files.get(&selected_key) {
                     
-                    // ‼️ This check will now SUCCEED because we waited for FileSaved
+
                     if path.exists() {
                         // This is a blocking call! It will pause the main loop
                         // briefly on the first load of a sample.
@@ -610,7 +610,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                     } else {
-                        // ‼️ This should no longer happen for new recordings
+
                         warn!("...Path {} does not exist, caching None.", path.display());
                         // File doesn't exist, cache None
                         loaded_peaks = None;

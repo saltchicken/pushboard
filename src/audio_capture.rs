@@ -124,7 +124,7 @@ fn handle_audio_commands(
         if let Some((buffer, format, path)) = save_data {
             save_recording_from_buffer(buffer, &format, &path);
             
-            // ‼️ File is saved! Notify the main thread.
+
             if let Err(e) = app_tx.send(AppCommand::FileSaved(path)) {
                 eprintln!("Failed to send FileSaved command to main thread: {}", e);
             }
