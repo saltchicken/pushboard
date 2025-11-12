@@ -1,5 +1,3 @@
-
-
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -7,7 +5,6 @@ use tokio::process::Command;
 /// Defines where audio should be played back.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PlaybackSink {
-
     Default,
     Mixer,
     Both,
@@ -19,7 +16,6 @@ pub async fn play_audio_file(
     sink_target: PlaybackSink,
     volume: f64,
 ) -> io::Result<()> {
-
     match sink_target {
         PlaybackSink::None => {
             println!("...playback sink is None (Muted).");
@@ -40,8 +36,8 @@ pub async fn play_audio_file(
     cmd_default.arg(path);
     cmd_default.stdout(Stdio::null()).stderr(Stdio::null());
     let mut cmd_mixer = Command::new(player);
-    cmd_default.arg("--volume");
-    cmd_default.arg(&volume_str);
+    cmd_mixer.arg("--volume");
+    cmd_mixer.arg(&volume_str);
     cmd_mixer.arg("--target");
     cmd_mixer.arg("MyMixer");
     cmd_mixer.arg(path);
@@ -98,3 +94,4 @@ pub async fn play_audio_file(
     println!("Playback successful for sink: {:?}", sink_target);
     Ok(())
 }
+
