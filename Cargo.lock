@@ -1367,6 +1367,7 @@ name = "pushboard"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "embedded-graphics",
  "env_logger",
  "hound",
  "image",

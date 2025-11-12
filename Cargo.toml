@@ -14,3 +14,4 @@ image = "0.25.8"
 imageproc = "0.25.0"
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
+embedded-graphics = "0.8.0"
