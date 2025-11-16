@@ -39,7 +39,7 @@ use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
 
-use tokio::task::JoinHandle; // ‼️
+use tokio::task::JoinHandle;
 
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 
@@ -60,7 +60,7 @@ struct AppState {
     sample_end_point: HashMap<u8, f64>,
     kira_cmd_tx: mpsc::Sender<audio_player::KiraCommand>,
     sound_data_cache: HashMap<u8, StaticSoundData>,
-    auto_stop_tasks: HashMap<u8, JoinHandle<()>>, // ‼️
+    auto_stop_tasks: HashMap<u8, JoinHandle<()>>,
 }
 
 // --- Color Constants for different states ---
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         sample_end_point: HashMap::new(),
         kira_cmd_tx: kira_tx,
         sound_data_cache: HashMap::new(),
-        auto_stop_tasks: HashMap::new(), // ‼️
+        auto_stop_tasks: HashMap::new(),
     };
 
     info!("\nConnection open. Soundboard example running.");
@@ -198,7 +198,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.sample_end_point.remove(&address);
                                 app_state.sound_data_cache.remove(&address);
 
-                                // ‼️ Also abort any pending auto-stop tasks
+
                                 if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                                     old_task.abort();
                                 }
@@ -405,7 +405,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
                         // 6. Schedule a Stop command to handle the "end_point"
 
-                        // ‼️ Cancel any previous "auto-stop" task for this pad
+
                         if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                             old_task.abort();
                             debug!("Aborted previous auto-stop task for pad {}", address);
@@ -421,11 +421,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
                         let kira_tx_clone = app_state.kira_cmd_tx.clone();
 
-                        // ‼️ Store the JoinHandle of the new task
+
                         let new_task_handle = tokio::spawn(async move {
                             tokio::time::sleep(adjusted_duration).await;
 
-                            // ‼️ The task was not aborted, so we send the stop command.
+
                             // If it *was* aborted, this code will never run.
                             if let Err(e) =
                                 kira_tx_clone.send(audio_player::KiraCommand::Stop(address))
@@ -435,7 +435,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         });
 
-                        // ‼️ Insert the new handle into the map
+
                         app_state.auto_stop_tasks.insert(address, new_task_handle);
 
                         // Set pad color to selected (since it's now the active one)
