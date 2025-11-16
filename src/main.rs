@@ -488,7 +488,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     *current_pitch
                                 );
 
-                                // ‼️ New realtime update logic
+
                                 // 1. Calculate the new playback rate from the pitch
                                 let playback_rate = 2.0_f64.powf(*current_pitch / 12.0);
 
@@ -739,4 +739,3 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     Ok(())
 }
-

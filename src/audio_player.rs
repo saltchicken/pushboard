@@ -3,7 +3,7 @@ use kira::{
     AudioManagerSettings,
     Easing,
     StartTime,
-    Tween, // ‼️ No change, just for context
+    Tween,
     backend::DefaultBackend,
     sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings},
 };
@@ -21,7 +21,7 @@ pub struct KiraPlayRequest {
 pub enum KiraCommand {
     Play(KiraPlayRequest),
     Stop(u8),                 // Stop sound for a specific pad key
-    SetPlaybackRate(u8, f64), // ‼️ New command: (pad_key, new_rate)
+    SetPlaybackRate(u8, f64),
 }
 
 /// This is kept from the original to maintain Mute/Solo logic.
@@ -76,7 +76,7 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                     let _ = handle.stop(tween);
                 }
             }
-            // ‼️ Handle the new SetPlaybackRate command
+
             KiraCommand::SetPlaybackRate(key, rate) => {
                 debug!(
                     "Kira thread received SetPlaybackRate for key {} to {}",
