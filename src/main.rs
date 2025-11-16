@@ -1,14 +1,13 @@
 pub mod audio_capture;
 pub mod audio_player;
-pub mod audio_processor;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AudioCommand {
     Start(PathBuf),
     Stop,
 }
-
 
 #[derive(Debug)]
 pub enum AppCommand {
@@ -25,6 +24,7 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
         None => Err(std::io::Error::other("Could not find audio directory")),
     }
 }
+
 // --- Original main.rs content below ---
 use crate::audio_player::PlaybackSink;
 use embedded_graphics::{
@@ -38,6 +38,10 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
+
+// ‼️ Import Kira types
+use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
+
 struct AppState {
     // mode: Mode,
     pad_files: HashMap<u8, PathBuf>,
@@ -53,7 +57,10 @@ struct AppState {
     waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
     sample_start_point: HashMap<u8, f64>,
     sample_end_point: HashMap<u8, f64>,
+    kira_cmd_tx: mpsc::Sender<audio_player::KiraCommand>, // ‼️ Added Kira command sender
+    sound_data_cache: HashMap<u8, StaticSoundData>,       // ‼️ Added cache for loaded sound data
 }
+
 // --- Color Constants for different states ---
 const COLOR_OFF: u8 = Push2Colors::BLACK;
 const COLOR_HAS_FILE: u8 = Push2Colors::BLUE_SKY;
@@ -75,25 +82,41 @@ const WAVEFORM_Y_END: i32 = 160; // Bottom of display
 const WAVEFORM_X_START: i32 = 0;
 const WAVEFORM_X_END: i32 = 960; // Full width of display
 const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
+
+    // --- ‼️ Set up all MPSC channels ---
     let (audio_tx, audio_rx) = mpsc::channel();
     let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
+    let (kira_tx, kira_rx) = mpsc::channel::<audio_player::KiraCommand>(); // ‼️ Kira channel
 
+    // --- ‼️ Spawn all threads ---
     std::thread::spawn(move || {
         println!("Audio capture thread started...");
-
         if let Err(e) = audio_capture::run_capture_loop(audio_rx, app_tx) {
             eprintln!("Audio capture thread failed: {}", e);
         } else {
             println!("Audio capture thread exited cleanly.");
         }
     });
+
+    // ‼️ Spawn Kira audio thread
+    std::thread::spawn(move || {
+        println!("Kira audio thread started...");
+        if let Err(e) = audio_player::run_kira_loop(kira_rx) {
+            eprintln!("Kira audio thread failed: {}", e);
+        } else {
+            println!("Kira audio thread exited cleanly.");
+        }
+    });
+
     // --- Config Loading ---
     let mut push2 = Push2::new()?;
     let audio_storage_path = get_audio_storage_path()?;
     println!("Audio storage path: {}", audio_storage_path.display());
+
     let mut app_state = AppState {
         // mode: Mode::Playback,
         pad_files: HashMap::new(),
@@ -109,7 +132,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         waveform_cache: HashMap::new(),
         sample_start_point: HashMap::new(),
         sample_end_point: HashMap::new(),
+        kira_cmd_tx: kira_tx,             // ‼️ Init Kira sender
+        sound_data_cache: HashMap::new(), // ‼️ Init sound data cache
     };
+
     info!("\nConnection open. Soundboard example running.");
     info!(
         "Mute: {} | Solo: {}",
@@ -130,6 +156,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             push2.set_pad_color(coord, color)?;
         }
     }
+
     // --- Main Loop ---
     loop {
         // -----------------------------------------------------------------
@@ -168,6 +195,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.waveform_cache.remove(&address);
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
+                                app_state.sound_data_cache.remove(&address); // ‼️ Clear sound cache
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -241,17 +269,13 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         continue;
                     }
                     if app_state.active_recording_key == Some(address) {
-
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
                             eprintln!("Failed to send STOP command: {}", e);
                         }
                         app_state.active_recording_key = None;
-                        
-
 
                         push2.set_pad_color(coord, COLOR_HAS_FILE)?;
-                        
                     } else if path.exists() {
                         // This was a playback trigger
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
@@ -260,7 +284,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         let prev_selected_key = app_state.selected_for_edit;
                         // Set the new pad as selected
                         app_state.selected_for_edit = Some(address);
-
                         // If a *different* pad was selected before, reset its color
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
@@ -280,7 +303,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
 
-                        // Get all playback parameters
+                        // ‼️ --- New Kira Playback Logic ---
+
+                        // 1. Get playback parameters
                         let pitch_shift = app_state
                             .pitch_shift_semitones
                             .get(&address)
@@ -296,7 +321,13 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-                        let path_clone = path.clone();
+                        let volume_clone = app_state
+                            .playback_volume
+                            .get(&address)
+                            .cloned()
+                            .unwrap_or(1.0);
+
+                        // 2. Check Mute/Solo logic
                         let sink_clone =
                             match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
                                 // Mute enabled, Solo enabled -> Default only
@@ -308,64 +339,86 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 // Mute enabled, Solo disabled -> None
                                 (true, false) => PlaybackSink::None,
                             };
-                        let volume_clone = app_state
-                            .playback_volume
-                            .get(&address)
-                            .cloned()
-                            .unwrap_or(1.0);
-                        // Spawn the playback task
-                        tokio::spawn(async move {
-                            let mut temp_path: Option<PathBuf> = None;
-                            // (pitched AND trimmed)
-                            let path_to_play = {
-                                let path_for_blocking = path_clone.clone();
-                                match tokio::task::spawn_blocking(move || {
-                                    audio_processor::create_processed_copy_sync(
-                                        &path_for_blocking,
-                                        pitch_shift,
-                                        start_point,
-                                        end_point,
-                                    )
-                                })
-                                .await
-                                {
-                                    Ok(Ok(new_path)) => {
-                                        temp_path = Some(new_path.clone());
-                                        new_path
-                                    }
-                                    Ok(Err(e)) => {
-                                        eprintln!(
-                                            "Failed to create processed copy: {}. Playing original.",
-                                            e
-                                        );
-                                        path_clone
+
+                        if sink_clone == PlaybackSink::None {
+                            info!("...Playback muted.");
+                            // Set pad color to selected (even though it's muted)
+                            push2.set_pad_color(coord, COLOR_SELECTED)?;
+                            continue; // ‼️ Don't play anything
+                        }
+
+                        // 3. Load sound data from cache or file
+                        let sound_data =
+                            if let Some(data) = app_state.sound_data_cache.get(&address) {
+                                data.clone()
+                            } else {
+                                info!("Cache miss for sound data {}. Loading...", address);
+                                match StaticSoundData::from_file(path) {
+                                    Ok(data) => {
+                                        app_state.sound_data_cache.insert(address, data.clone());
+                                        data
                                     }
                                     Err(e) => {
-                                        eprintln!("Task join error: {}. Playing original.", e);
-                                        path_clone
+                                        eprintln!(
+                                            "Failed to load sound file {}: {}",
+                                            path.display(),
+                                            e
+                                        );
+                                        continue; // Skip playback
                                     }
                                 }
                             };
-                            if let Err(e) = audio_player::play_audio_file(
-                                &path_to_play,
-                                sink_clone,
-                                volume_clone,
+
+                        // 4. Calculate Kira settings
+                        let playback_rate = 2.0_f64.powf(pitch_shift / 12.0);
+                        let duration_seconds = sound_data.duration().as_secs_f64();
+                        let start_seconds = duration_seconds * start_point;
+                        let end_seconds = duration_seconds * end_point;
+                        let play_duration_seconds = (end_seconds - start_seconds).max(0.0);
+
+                        let settings = StaticSoundSettings::new()
+                            .volume(volume_clone as f32)
+                            .playback_rate(playback_rate)
+                            .start_position(start_seconds);
+
+                        // 5. Send Play command to Kira thread
+                        let req = audio_player::KiraPlayRequest {
+                            pad_key: address,
+                            sound_data,
+                            settings,
+                        };
+                        if let Err(e) = app_state
+                            .kira_cmd_tx
+                            .send(audio_player::KiraCommand::Play(req))
+                        {
+                            eprintln!("Failed to send Play command to kira thread: {}", e);
+                        }
+
+                        // 6. Schedule a Stop command to handle the "end_point"
+                        let adjusted_duration = if playback_rate.abs() > 1e-6 {
+                            time::Duration::from_secs_f64(
+                                play_duration_seconds / playback_rate.abs(),
                             )
-                            .await
+                        } else {
+                            time::Duration::from_secs(0)
+                        };
+
+                        let kira_tx_clone = app_state.kira_cmd_tx.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(adjusted_duration).await;
+                            if let Err(e) =
+                                kira_tx_clone.send(audio_player::KiraCommand::Stop(address))
                             {
-                                eprintln!("Playback failed: {}", e);
-                            }
-                            // Clean up the temporary file
-                            if let Some(p) = temp_path {
-                                if let Err(e) = tokio_fs::remove_file(&p).await {
-                                    eprintln!(
-                                        "Failed to clean up temp file {}: {}",
-                                        p.display(),
-                                        e
-                                    );
-                                }
+                                // This might fail if the sound was re-triggered, which is fine.
+                                debug!("Failed to send Stop command (likely re-triggered): {}", e);
                             }
                         });
+
+                        // ‼️ --- End of Kira Playback Logic ---
+
+                        // ‼️ --- Old playback task REMOVED ---
+                        // tokio::spawn(async move { ... });
+
                         // Set pad color to selected (since it's now the active one)
                         push2.set_pad_color(coord, COLOR_SELECTED)?;
                     } else {
@@ -502,15 +555,12 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 _ => {}
             }
         }
-        
-
-
 
         while let Ok(app_event) = app_rx.try_recv() {
             match app_event {
                 AppCommand::FileSaved(path) => {
                     info!("Main thread notified that {} was saved.", path.display());
-                    
+
                     // Find the pad address associated with this path
                     let mut found_address = None;
                     for (addr, pad_path) in &app_state.pad_files {
@@ -519,20 +569,19 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             break;
                         }
                     }
-
                     if let Some(address) = found_address {
-
                         app_state.waveform_cache.remove(&address);
-
-
+                        app_state.sound_data_cache.remove(&address); // ‼️ Clear sound cache
                         let prev_selected_key = app_state.selected_for_edit;
                         app_state.selected_for_edit = Some(address);
-
-
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
                                 if let Some(old_coord) = push2.button_map.get_note(prev_key) {
-                                    let old_color = if app_state.pad_files.get(&prev_key).map_or(false, |p| p.exists()) {
+                                    let old_color = if app_state
+                                        .pad_files
+                                        .get(&prev_key)
+                                        .map_or(false, |p| p.exists())
+                                    {
                                         COLOR_HAS_FILE
                                     } else {
                                         COLOR_OFF
@@ -542,18 +591,19 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 }
                             }
                         }
-                        
 
                         if let Some(coord) = push2.button_map.get_note(address) {
                             let _ = push2.set_pad_color(coord, COLOR_SELECTED);
                         }
                     } else {
-                        warn!("FileSaved event received for a path not in pad_files: {}", path.display());
+                        warn!(
+                            "FileSaved event received for a path not in pad_files: {}",
+                            path.display()
+                        );
                     }
                 }
             }
         }
-
         // -----------------------------------------------------------------
         // 2. GUI DRAWING: Render the display
         // -----------------------------------------------------------------
@@ -592,8 +642,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 warn!("Cache miss for waveform {}. Loading...", selected_key);
                 let mut loaded_peaks: Option<Vec<(f32, f32)>> = None;
                 if let Some(path) = app_state.pad_files.get(&selected_key) {
-                    
-
                     if path.exists() {
                         // This is a blocking call! It will pause the main loop
                         // briefly on the first load of a sample.
@@ -610,7 +658,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
                     } else {
-
                         warn!("...Path {} does not exist, caching None.", path.display());
                         // File doesn't exist, cache None
                         loaded_peaks = None;
@@ -704,3 +751,4 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     Ok(())
 }
+
