@@ -1,9 +1,5 @@
 use kira::{
-    AudioManager,
-    AudioManagerSettings,
-    Easing,
-    StartTime,
-    Tween,
+    AudioManager, AudioManagerSettings, Easing, StartTime, Tween,
     backend::DefaultBackend,
     sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings},
 };
@@ -20,7 +16,7 @@ pub struct KiraPlayRequest {
 #[derive(Debug)]
 pub enum KiraCommand {
     Play(KiraPlayRequest),
-    Stop(u8),                 // Stop sound for a specific pad key
+    Stop(u8), // Stop sound for a specific pad key
     SetPlaybackRate(u8, f64),
 }
 
@@ -51,7 +47,7 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                         duration: Duration::from_millis(10),
                         easing: Easing::Linear,
                     };
-                    let _ = old_handle.stop(tween);
+                    old_handle.stop(tween);
                 }
                 // Play the new sound
                 match manager.play(req.sound_data.with_settings(req.settings)) {
@@ -73,7 +69,7 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                         duration: Duration::from_millis(10),
                         easing: Easing::Linear,
                     };
-                    let _ = handle.stop(tween);
+                    handle.stop(tween);
                 }
             }
 
@@ -100,3 +96,4 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
     println!("Kira command channel closed. Exiting audio loop.");
     Ok(())
 }
+
