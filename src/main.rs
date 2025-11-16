@@ -3,6 +3,23 @@ pub mod audio_player;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::audio_player::PlaybackSink;
+use embedded_graphics::{
+    pixelcolor::Bgr565,
+    prelude::*,
+    primitives::{Line, Primitive, PrimitiveStyle},
+};
+use log::{debug, info, warn};
+use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
+use std::collections::HashMap;
+use std::sync::mpsc;
+use std::{error, time};
+use tokio::fs as tokio_fs;
+
+use tokio::task::JoinHandle;
+
+use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AudioCommand {
     Start(PathBuf),
@@ -24,24 +41,6 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
         None => Err(std::io::Error::other("Could not find audio directory")),
     }
 }
-
-// --- Original main.rs content below ---
-use crate::audio_player::PlaybackSink;
-use embedded_graphics::{
-    pixelcolor::Bgr565,
-    prelude::*,
-    primitives::{Line, Primitive, PrimitiveStyle},
-};
-use log::{debug, info, warn};
-use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
-use std::collections::HashMap;
-use std::sync::mpsc;
-use std::{error, time};
-use tokio::fs as tokio_fs;
-
-use tokio::task::JoinHandle;
-
-use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 
 struct AppState {
     // mode: Mode,
@@ -197,7 +196,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
                                 app_state.sound_data_cache.remove(&address);
-
 
                                 if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                                     old_task.abort();
@@ -405,7 +403,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
                         // 6. Schedule a Stop command to handle the "end_point"
 
-
                         if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                             old_task.abort();
                             debug!("Aborted previous auto-stop task for pad {}", address);
@@ -421,10 +418,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
                         let kira_tx_clone = app_state.kira_cmd_tx.clone();
 
-
                         let new_task_handle = tokio::spawn(async move {
                             tokio::time::sleep(adjusted_duration).await;
-
 
                             // If it *was* aborted, this code will never run.
                             if let Err(e) =
@@ -434,7 +429,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 debug!("Failed to send Stop command (likely re-triggered): {}", e);
                             }
                         });
-
 
                         app_state.auto_stop_tasks.insert(address, new_task_handle);
 
@@ -798,3 +792,4 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
     Ok(())
 }
+
