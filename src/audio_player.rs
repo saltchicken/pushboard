@@ -1,11 +1,14 @@
 use kira::{
-    AudioManager, AudioManagerSettings, Easing, StartTime, Tween,
+    AudioManager,
+    AudioManagerSettings,
+    Easing,
+    StartTime,
+    Tween, // ‼️ No change, just for context
     backend::DefaultBackend,
     sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings},
 };
 use log::debug;
 use std::{collections::HashMap, sync::mpsc::Receiver, time::Duration};
-
 
 #[derive(Debug)]
 pub struct KiraPlayRequest {
@@ -14,13 +17,12 @@ pub struct KiraPlayRequest {
     pub settings: StaticSoundSettings,
 }
 
-
 #[derive(Debug)]
 pub enum KiraCommand {
     Play(KiraPlayRequest),
-    Stop(u8), // Stop sound for a specific pad key
+    Stop(u8),                 // Stop sound for a specific pad key
+    SetPlaybackRate(u8, f64), // ‼️ New command: (pad_key, new_rate)
 }
-
 
 /// This is kept from the original to maintain Mute/Solo logic.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -31,10 +33,8 @@ pub enum PlaybackSink {
     None,
 }
 
-
 pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error::Error>> {
     let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())?;
-
     // Track all actively playing sound handles
     let mut active_handles: HashMap<u8, StaticSoundHandle> = HashMap::new();
 
@@ -51,10 +51,8 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                         duration: Duration::from_millis(10),
                         easing: Easing::Linear,
                     };
-
                     let _ = old_handle.stop(tween);
                 }
-
                 // Play the new sound
                 match manager.play(req.sound_data.with_settings(req.settings)) {
                     Ok(handle) => {
@@ -75,8 +73,25 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                         duration: Duration::from_millis(10),
                         easing: Easing::Linear,
                     };
-
                     let _ = handle.stop(tween);
+                }
+            }
+            // ‼️ Handle the new SetPlaybackRate command
+            KiraCommand::SetPlaybackRate(key, rate) => {
+                debug!(
+                    "Kira thread received SetPlaybackRate for key {} to {}",
+                    key, rate
+                );
+                // Find the active handle for this key
+                if let Some(handle) = active_handles.get_mut(&key) {
+                    // Use a short tween to smooth the transition and avoid clicks
+                    let tween = Tween {
+                        start_time: StartTime::Immediate,
+                        duration: Duration::from_millis(10),
+                        easing: Easing::Linear,
+                    };
+                    // Set the playback rate on the running sound
+                    handle.set_playback_rate(rate, tween)
                 }
             }
         }

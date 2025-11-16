@@ -1,36 +1,30 @@
 pub mod audio_capture;
 pub mod audio_player;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-
 use crate::audio_player::PlaybackSink;
 use embedded_graphics::{
     pixelcolor::Bgr565,
     prelude::*,
     primitives::{Line, Primitive, PrimitiveStyle},
 };
+use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 use log::{debug, info, warn};
 use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push2Event};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
-
 use tokio::task::JoinHandle;
-
-use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AudioCommand {
     Start(PathBuf),
     Stop,
 }
-
 #[derive(Debug)]
 pub enum AppCommand {
     FileSaved(PathBuf),
 }
-
 pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
     match dirs::audio_dir() {
         Some(mut path) => {
@@ -41,7 +35,6 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
         None => Err(std::io::Error::other("Could not find audio directory")),
     }
 }
-
 struct AppState {
     // mode: Mode,
     pad_files: HashMap<u8, PathBuf>,
@@ -61,7 +54,6 @@ struct AppState {
     sound_data_cache: HashMap<u8, StaticSoundData>,
     auto_stop_tasks: HashMap<u8, JoinHandle<()>>,
 }
-
 // --- Color Constants for different states ---
 const COLOR_OFF: u8 = Push2Colors::BLACK;
 const COLOR_HAS_FILE: u8 = Push2Colors::BLUE_SKY;
@@ -83,14 +75,12 @@ const WAVEFORM_Y_END: i32 = 160; // Bottom of display
 const WAVEFORM_X_START: i32 = 0;
 const WAVEFORM_X_END: i32 = 960; // Full width of display
 const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
     let (audio_tx, audio_rx) = mpsc::channel();
     let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
     let (kira_tx, kira_rx) = mpsc::channel::<audio_player::KiraCommand>();
-
     std::thread::spawn(move || {
         println!("Audio capture thread started...");
         if let Err(e) = audio_capture::run_capture_loop(audio_rx, app_tx) {
@@ -99,7 +89,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             println!("Audio capture thread exited cleanly.");
         }
     });
-
     std::thread::spawn(move || {
         println!("Kira audio thread started...");
         if let Err(e) = audio_player::run_kira_loop(kira_rx) {
@@ -108,12 +97,10 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             println!("Kira audio thread exited cleanly.");
         }
     });
-
     // --- Config Loading ---
     let mut push2 = Push2::new()?;
     let audio_storage_path = get_audio_storage_path()?;
     println!("Audio storage path: {}", audio_storage_path.display());
-
     let mut app_state = AppState {
         // mode: Mode::Playback,
         pad_files: HashMap::new(),
@@ -133,13 +120,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         sound_data_cache: HashMap::new(),
         auto_stop_tasks: HashMap::new(),
     };
-
     info!("\nConnection open. Soundboard example running.");
     info!(
         "Mute: {} | Solo: {}",
         app_state.is_mute_enabled, app_state.is_solo_enabled
     );
-
     for y in 0..8 {
         for x in 0..8 {
             let coord = PadCoord { x, y };
@@ -155,7 +140,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             push2.set_pad_color(coord, color)?;
         }
     }
-
     // --- Main Loop ---
     loop {
         // -----------------------------------------------------------------
@@ -171,7 +155,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
-
                     if app_state.is_delete_held {
                         info!("Delete held. Deleting sample on pad press.");
                         if let Some(path_buf) = app_state.pad_files.get(&address).cloned() {
@@ -196,11 +179,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
                                 app_state.sound_data_cache.remove(&address);
-
                                 if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                                     old_task.abort();
                                 }
-
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -259,7 +240,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     let Some(path) = app_state.pad_files.get(&address) else {
                         continue;
                     };
-
                     // If Select or Delete is held, we just reset the pad color
                     // (the action happened on press)
                     if app_state.is_delete_held || app_state.is_select_held {
@@ -274,7 +254,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         }
                         continue;
                     }
-
                     if app_state.active_recording_key == Some(address) {
                         info!("STOP recording.");
                         if let Err(e) = app_state.audio_cmd_tx.send(AudioCommand::Stop) {
@@ -285,14 +264,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     } else if path.exists() {
                         // This was a playback trigger
                         info!("Triggering playback for pad ({}, {}).", coord.x, coord.y);
-
                         // --- Playback and Selection Logic ---
                         // Store the previously selected key
                         let prev_selected_key = app_state.selected_for_edit;
-
                         // Set the new pad as selected
                         app_state.selected_for_edit = Some(address);
-
                         // If a *different* pad was selected before, reset its color
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
@@ -311,7 +287,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 }
                             }
                         }
-
                         // 1. Get playback parameters
                         let pitch_shift = app_state
                             .pitch_shift_semitones
@@ -333,7 +308,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-
                         // 2. Check Mute/Solo logic
                         let sink_clone =
                             match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
@@ -346,14 +320,12 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 // Mute enabled, Solo disabled -> None
                                 (true, false) => PlaybackSink::None,
                             };
-
                         if sink_clone == PlaybackSink::None {
                             info!("...Playback muted.");
                             // Set pad color to selected (even though it's muted)
                             push2.set_pad_color(coord, COLOR_SELECTED)?;
                             continue;
                         }
-
                         // 3. Load sound data from cache or file
                         let sound_data =
                             if let Some(data) = app_state.sound_data_cache.get(&address) {
@@ -375,19 +347,16 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     }
                                 }
                             };
-
                         // 4. Calculate Kira settings
                         let playback_rate = 2.0_f64.powf(pitch_shift / 12.0);
                         let duration_seconds = sound_data.duration().as_secs_f64();
                         let start_seconds = duration_seconds * start_point;
                         let end_seconds = duration_seconds * end_point;
                         let play_duration_seconds = (end_seconds - start_seconds).max(0.0);
-
                         let settings = StaticSoundSettings::new()
                             .volume(volume_clone as f32)
                             .playback_rate(playback_rate)
                             .start_position(start_seconds);
-
                         // 5. Send Play command to Kira thread
                         let req = audio_player::KiraPlayRequest {
                             pad_key: address,
@@ -400,14 +369,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         {
                             eprintln!("Failed to send Play command to kira thread: {}", e);
                         }
-
                         // 6. Schedule a Stop command to handle the "end_point"
-
                         if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                             old_task.abort();
                             debug!("Aborted previous auto-stop task for pad {}", address);
                         }
-
                         let adjusted_duration = if playback_rate.abs() > 1e-6 {
                             time::Duration::from_secs_f64(
                                 play_duration_seconds / playback_rate.abs(),
@@ -415,12 +381,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         } else {
                             time::Duration::from_secs(0)
                         };
-
                         let kira_tx_clone = app_state.kira_cmd_tx.clone();
-
                         let new_task_handle = tokio::spawn(async move {
                             tokio::time::sleep(adjusted_duration).await;
-
                             // If it *was* aborted, this code will never run.
                             if let Err(e) =
                                 kira_tx_clone.send(audio_player::KiraCommand::Stop(address))
@@ -429,9 +392,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 debug!("Failed to send Stop command (likely re-triggered): {}", e);
                             }
                         });
-
                         app_state.auto_stop_tasks.insert(address, new_task_handle);
-
                         // Set pad color to selected (since it's now the active one)
                         push2.set_pad_color(coord, COLOR_SELECTED)?;
                     } else {
@@ -485,10 +446,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     if name == ControlName::Select {
                         app_state.is_select_held = false;
                     }
-
                     let is_mute_on = name == ControlName::Mute && app_state.is_mute_enabled;
                     let is_solo_on = name == ControlName::Solo && app_state.is_solo_enabled;
-
                     if !is_mute_on && !is_solo_on {
                         push2.set_button_light(name, 0)?;
                     }
@@ -502,7 +461,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     } else {
                         raw_delta as i32
                     };
-
                     match name {
                         EncoderName::Track1 => {
                             // Volume Control
@@ -529,6 +487,17 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     "Set pitch for selected pad to {:.2} semitones",
                                     *current_pitch
                                 );
+
+                                // ‼️ New realtime update logic
+                                // 1. Calculate the new playback rate from the pitch
+                                let playback_rate = 2.0_f64.powf(*current_pitch / 12.0);
+
+                                // 2. Send the command to the Kira thread to update it in realtime
+                                if let Err(e) = app_state.kira_cmd_tx.send(
+                                    audio_player::KiraCommand::SetPlaybackRate(key, playback_rate),
+                                ) {
+                                    eprintln!("Failed to send SetPlaybackRate command: {}", e);
+                                }
                             }
                         }
                         EncoderName::Track3 => {
@@ -571,7 +540,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 _ => {}
             }
         }
-
         while let Ok(app_event) = app_rx.try_recv() {
             match app_event {
                 AppCommand::FileSaved(path) => {
@@ -584,21 +552,17 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             break;
                         }
                     }
-
                     if let Some(address) = found_address {
                         // Clear caches
                         app_state.waveform_cache.remove(&address);
                         app_state.sound_data_cache.remove(&address);
-
                         // Abort any pending stop tasks
                         if let Some(old_task) = app_state.auto_stop_tasks.remove(&address) {
                             old_task.abort();
                         }
-
                         // Select the newly recorded pad
                         let prev_selected_key = app_state.selected_for_edit;
                         app_state.selected_for_edit = Some(address);
-
                         if let Some(prev_key) = prev_selected_key {
                             if prev_key != address {
                                 if let Some(old_coord) = push2.button_map.get_note(prev_key) {
@@ -616,7 +580,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 }
                             }
                         }
-
                         if let Some(coord) = push2.button_map.get_note(address) {
                             let _ = push2.set_pad_color(coord, COLOR_SELECTED);
                         }
@@ -629,13 +592,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 }
             }
         }
-
         // -----------------------------------------------------------------
         // 2. GUI DRAWING: Render the display
         // -----------------------------------------------------------------
         // Clear the display buffer to black
         push2.display.clear(Bgr565::BLACK).unwrap(); // Infallible
-
         // Draw waveform AND encoder bars only if a pad is selected
         if let Some(selected_key) = app_state.selected_for_edit {
             // This fixes the scope errors from before.
@@ -645,28 +606,24 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(1.0);
-
             // Get Pitch (for Encoder 2)
             let pitch = app_state
                 .pitch_shift_semitones
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(0.0);
-
             // Get Start Point (for Encoder 3)
             let start_pct = app_state
                 .sample_start_point
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(0.0) as f32; // Use f32 for drawing
-
             // Get End Point (for Encoder 4)
             let end_pct = app_state
                 .sample_end_point
                 .get(&selected_key)
                 .cloned()
                 .unwrap_or(1.0) as f32; // Use f32 for drawing
-
             // --- Load/Draw Waveform ---
             // Step 1: Check cache. If it's not there, load it.
             if !app_state.waveform_cache.contains_key(&selected_key) {
@@ -696,7 +653,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 }
                 app_state.waveform_cache.insert(selected_key, loaded_peaks);
             }
-
             // Step 2: Draw the cached waveform (if it loaded successfully)
             if let Some(Some(peaks)) = app_state.waveform_cache.get(&selected_key) {
                 if !peaks.is_empty() {
@@ -706,7 +662,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 // Calculate X coordinates
                 let start_x = WAVEFORM_X_START + (start_pct * WAVEFORM_WIDTH as f32).round() as i32;
                 let end_x = WAVEFORM_X_START + (end_pct * WAVEFORM_WIDTH as f32).round() as i32;
-
                 // Draw start line
                 Line::new(
                     Point::new(start_x, WAVEFORM_Y_START),
@@ -714,7 +669,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 )
                 .into_styled(PrimitiveStyle::with_stroke(COLOR_START_LINE, 1))
                 .draw(&mut push2.display)?;
-
                 // Draw end line
                 Line::new(
                     Point::new(end_x, WAVEFORM_Y_START),
@@ -723,7 +677,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .into_styled(PrimitiveStyle::with_stroke(COLOR_STOP_LINE, 1))
                 .draw(&mut push2.display)?;
             }
-
             // --- Draw Volume Bar (Track 1, Index 0) ---
             // Normalize volume (0.0 - 1.5) to a 0-127 i32 value
             let volume_norm = (volume / 1.5).clamp(0.0, 1.0);
@@ -736,7 +689,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(0, volume_val, COLOR_VOLUME_BAR)
                 .unwrap();
-
             // --- Draw Pitch Bar (Track 2, Index 1) ---
             // Normalize pitch (+/- PITCH_RANGE) to a 0-127 i32 value
             // Map [-12.0, 12.0] to [0.0, 1.0]
@@ -751,7 +703,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(1, pitch_val, COLOR_PITCH_BAR)
                 .unwrap();
-
             // --- Draw Start Bar (Track 3, Index 2) ---
             let start_val = (start_pct.clamp(0.0, 1.0) * 127.0) as i32;
             push2
@@ -762,7 +713,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .display
                 .draw_encoder_bar(2, start_val, COLOR_START_LINE)
                 .unwrap();
-
             // --- Draw End Bar (Track 4, Index 3) ---
             let end_val = (end_pct.clamp(0.0, 1.0) * 127.0) as i32;
             push2
@@ -774,7 +724,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .draw_encoder_bar(3, end_val, COLOR_STOP_LINE)
                 .unwrap();
         }
-
         // -----------------------------------------------------------------
         // 3. FLUSH: Send the frame buffer to the display
         // -----------------------------------------------------------------
@@ -783,13 +732,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             // On a display error, we might want to break the loop
             break;
         }
-
         // -----------------------------------------------------------------
         // 4. SLEEP: Maintain a steady frame rate
         // -----------------------------------------------------------------
         tokio::time::sleep(time::Duration::from_millis(1000 / 60)).await;
     }
-
     Ok(())
 }
 
