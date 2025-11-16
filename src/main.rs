@@ -39,7 +39,7 @@ use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
 
-// ‼️ Import Kira types
+
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 
 struct AppState {
@@ -57,8 +57,8 @@ struct AppState {
     waveform_cache: HashMap<u8, Option<Vec<(f32, f32)>>>,
     sample_start_point: HashMap<u8, f64>,
     sample_end_point: HashMap<u8, f64>,
-    kira_cmd_tx: mpsc::Sender<audio_player::KiraCommand>, // ‼️ Added Kira command sender
-    sound_data_cache: HashMap<u8, StaticSoundData>,       // ‼️ Added cache for loaded sound data
+    kira_cmd_tx: mpsc::Sender<audio_player::KiraCommand>,
+    sound_data_cache: HashMap<u8, StaticSoundData>,
 }
 
 // --- Color Constants for different states ---
@@ -87,12 +87,12 @@ const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
 
-    // --- ‼️ Set up all MPSC channels ---
+
     let (audio_tx, audio_rx) = mpsc::channel();
     let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
-    let (kira_tx, kira_rx) = mpsc::channel::<audio_player::KiraCommand>(); // ‼️ Kira channel
+    let (kira_tx, kira_rx) = mpsc::channel::<audio_player::KiraCommand>();
 
-    // --- ‼️ Spawn all threads ---
+
     std::thread::spawn(move || {
         println!("Audio capture thread started...");
         if let Err(e) = audio_capture::run_capture_loop(audio_rx, app_tx) {
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         }
     });
 
-    // ‼️ Spawn Kira audio thread
+
     std::thread::spawn(move || {
         println!("Kira audio thread started...");
         if let Err(e) = audio_player::run_kira_loop(kira_rx) {
@@ -132,8 +132,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         waveform_cache: HashMap::new(),
         sample_start_point: HashMap::new(),
         sample_end_point: HashMap::new(),
-        kira_cmd_tx: kira_tx,             // ‼️ Init Kira sender
-        sound_data_cache: HashMap::new(), // ‼️ Init sound data cache
+        kira_cmd_tx: kira_tx,
+        sound_data_cache: HashMap::new(),
     };
 
     info!("\nConnection open. Soundboard example running.");
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                 app_state.waveform_cache.remove(&address);
                                 app_state.sample_start_point.remove(&address);
                                 app_state.sample_end_point.remove(&address);
-                                app_state.sound_data_cache.remove(&address); // ‼️ Clear sound cache
+                                app_state.sound_data_cache.remove(&address);
                                 push2.set_pad_color(coord, COLOR_OFF)?;
                                 // If this pad was the selected one, deselect it
                                 if app_state.selected_for_edit == Some(address) {
@@ -303,7 +303,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         }
 
-                        // ‼️ --- New Kira Playback Logic ---
+
 
                         // 1. Get playback parameters
                         let pitch_shift = app_state
@@ -344,7 +344,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             info!("...Playback muted.");
                             // Set pad color to selected (even though it's muted)
                             push2.set_pad_color(coord, COLOR_SELECTED)?;
-                            continue; // ‼️ Don't play anything
+                            continue;
                         }
 
                         // 3. Load sound data from cache or file
@@ -414,9 +414,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             }
                         });
 
-                        // ‼️ --- End of Kira Playback Logic ---
 
-                        // ‼️ --- Old playback task REMOVED ---
+
+
                         // tokio::spawn(async move { ... });
 
                         // Set pad color to selected (since it's now the active one)
@@ -571,7 +571,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                     }
                     if let Some(address) = found_address {
                         app_state.waveform_cache.remove(&address);
-                        app_state.sound_data_cache.remove(&address); // ‼️ Clear sound cache
+                        app_state.sound_data_cache.remove(&address);
                         let prev_selected_key = app_state.selected_for_edit;
                         app_state.selected_for_edit = Some(address);
                         if let Some(prev_key) = prev_selected_key {
@@ -751,4 +751,3 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     }
     Ok(())
 }
-

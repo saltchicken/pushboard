@@ -6,7 +6,7 @@ use kira::{
 use log::debug;
 use std::{collections::HashMap, sync::mpsc::Receiver, time::Duration};
 
-/// ‼️ Defines a request to play a sound via Kira.
+
 #[derive(Debug)]
 pub struct KiraPlayRequest {
     pub pad_key: u8,
@@ -14,14 +14,14 @@ pub struct KiraPlayRequest {
     pub settings: StaticSoundSettings,
 }
 
-/// ‼️ Defines commands to control the Kira audio thread.
+
 #[derive(Debug)]
 pub enum KiraCommand {
     Play(KiraPlayRequest),
     Stop(u8), // Stop sound for a specific pad key
 }
 
-/// ‼️ Defines where audio should be played back.
+
 /// This is kept from the original to maintain Mute/Solo logic.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PlaybackSink {
@@ -31,7 +31,7 @@ pub enum PlaybackSink {
     None,
 }
 
-/// ‼️ Runs the Kira audio manager in a dedicated thread, blocking on a channel for commands.
+
 pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error::Error>> {
     let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())?;
 
@@ -85,4 +85,3 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
     println!("Kira command channel closed. Exiting audio loop.");
     Ok(())
 }
-
