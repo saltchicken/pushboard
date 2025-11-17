@@ -18,6 +18,7 @@ pub enum KiraCommand {
     Play(KiraPlayRequest),
     Stop(u8), // Stop sound for a specific pad key
     SetPlaybackRate(u8, f64),
+    SetVolume(u8, f64),
 }
 
 /// This is kept from the original to maintain Mute/Solo logic.
@@ -90,10 +91,26 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
                     handle.set_playback_rate(rate, tween)
                 }
             }
+            KiraCommand::SetVolume(key, volume) => {
+                debug!(
+                    "Kira thread received SetVolume for key {} to {}",
+                    key, volume
+                );
+                // Find the active handle for this key
+                if let Some(handle) = active_handles.get_mut(&key) {
+                    // Use a short tween to smooth the transition and avoid clicks
+                    let tween = Tween {
+                        start_time: StartTime::Immediate,
+                        duration: Duration::from_millis(10),
+                        easing: Easing::Linear,
+                    };
+                    // Set the playback rate on the running sound
+                    handle.set_volume(volume as f32, tween)
+                }
+            }
         }
     }
 
     println!("Kira command channel closed. Exiting audio loop.");
     Ok(())
 }
-

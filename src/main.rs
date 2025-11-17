@@ -75,6 +75,10 @@ const WAVEFORM_Y_END: i32 = 160; // Bottom of display
 const WAVEFORM_X_START: i32 = 0;
 const WAVEFORM_X_END: i32 = 960; // Full width of display
 const WAVEFORM_WIDTH: i32 = WAVEFORM_X_END - WAVEFORM_X_START;
+
+const VOLUME_MIN: f64 = -30.0;
+const VOLUME_MAX: f64 = 15.0;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     env_logger::init();
@@ -467,12 +471,19 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             if let Some(key) = app_state.selected_for_edit {
                                 let current_volume =
                                     app_state.playback_volume.entry(key).or_insert(1.0);
-                                *current_volume += delta as f64 * 0.01; // 1% per tick
-                                *current_volume = current_volume.clamp(0.0, 1.5); // 0% to 150%
+                                *current_volume += delta as f64 * 0.10; // 1% per tick
+                                *current_volume = current_volume.clamp(VOLUME_MIN, VOLUME_MAX);
                                 info!(
                                     "Set volume for selected pad to {:.0}%",
                                     *current_volume * 100.0
                                 );
+                                if let Err(e) = app_state.kira_cmd_tx.send(
+                                    audio_player::KiraCommand::SetVolume(key, *current_volume),
+                                ) {
+                                    eprintln!("Failed to send SetVolume command: {}", e);
+                                }
+                            } else {
+                                eprintln!("No pad selected for volume control");
                             }
                         }
                         EncoderName::Track2 => {
@@ -487,7 +498,6 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                                     "Set pitch for selected pad to {:.2} semitones",
                                     *current_pitch
                                 );
-
 
                                 // 1. Calculate the new playback rate from the pitch
                                 let playback_rate = 2.0_f64.powf(*current_pitch / 12.0);
@@ -678,8 +688,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                 .draw(&mut push2.display)?;
             }
             // --- Draw Volume Bar (Track 1, Index 0) ---
-            // Normalize volume (0.0 - 1.5) to a 0-127 i32 value
-            let volume_norm = (volume / 1.5).clamp(0.0, 1.0);
+            // Normalize volume from new range [VOLUME_MIN, VOLUME_MAX] to [0.0, 1.0]
+            let volume_norm = ((volume - VOLUME_MIN) / (VOLUME_MAX - VOLUME_MIN)).clamp(0.0, 1.0);
             let volume_val = (volume_norm * 127.0) as i32;
             push2
                 .display
