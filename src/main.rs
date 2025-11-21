@@ -12,10 +12,17 @@ use push2::{ControlName, EncoderName, GuiApi, PadCoord, Push2, Push2Colors, Push
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc;
 use std::{error, time};
 use tokio::fs as tokio_fs;
 use tokio::task::JoinHandle;
+
+const LINK_APP_MIXER: &str = "alsa_playback.pushboard";
+const LINK_TARGET_MIXER: &str = "MyMixer";
+const LINK_APP_DEFAULT: &str = "alsa_playback.pushboard";
+const LINK_TARGET_DEFAULT: &str = "alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink";
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AudioCommand {
     Start(PathBuf),
@@ -25,6 +32,50 @@ pub enum AudioCommand {
 pub enum AppCommand {
     FileSaved(PathBuf),
 }
+
+fn update_pipewire_links(sink: PlaybackSink) {
+    // Helper closure to run pw-link
+    let run_link = |connect: bool, output: &str, input: &str| {
+        let mut cmd = Command::new("pw-link");
+        if !connect {
+            cmd.arg("-d");
+        }
+        cmd.arg(output).arg(input);
+
+        // We ignore the result because pw-link returns an error if the link
+        // already exists (on connect) or doesn't exist (on disconnect),
+        // which is fine for our idempotent needs.
+        let _ = cmd.output();
+    };
+
+    match sink {
+        PlaybackSink::Default => {
+            // Connect Default, Disconnect Mixer
+            run_link(true, LINK_APP_DEFAULT, LINK_TARGET_DEFAULT);
+            run_link(false, LINK_APP_MIXER, LINK_TARGET_MIXER);
+            info!("Audio Routing: Default Speaker Only");
+        }
+        PlaybackSink::Mixer => {
+            // Disconnect Default, Connect Mixer
+            run_link(false, LINK_APP_DEFAULT, LINK_TARGET_DEFAULT);
+            run_link(true, LINK_APP_MIXER, LINK_TARGET_MIXER);
+            info!("Audio Routing: MyMixer Only");
+        }
+        PlaybackSink::Both => {
+            // Connect Both
+            run_link(true, LINK_APP_DEFAULT, LINK_TARGET_DEFAULT);
+            run_link(true, LINK_APP_MIXER, LINK_TARGET_MIXER);
+            info!("Audio Routing: Both");
+        }
+        PlaybackSink::None => {
+            // Disconnect Both
+            run_link(false, LINK_APP_DEFAULT, LINK_TARGET_DEFAULT);
+            run_link(false, LINK_APP_MIXER, LINK_TARGET_MIXER);
+            info!("Audio Routing: Muted (None)");
+        }
+    }
+}
+
 pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
     match dirs::audio_dir() {
         Some(mut path) => {
@@ -101,6 +152,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
             println!("Kira audio thread exited cleanly.");
         }
     });
+
+    tokio::time::sleep(time::Duration::from_millis(2000)).await;
+
     // --- Config Loading ---
     let mut push2 = Push2::new()?;
     let audio_storage_path = get_audio_storage_path()?;
@@ -124,6 +178,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         sound_data_cache: HashMap::new(),
         auto_stop_tasks: HashMap::new(),
     };
+
+    update_pipewire_links(PlaybackSink::Mixer);
+
     info!("\nConnection open. Soundboard example running.");
     info!(
         "Mute: {} | Solo: {}",
@@ -312,25 +369,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                             .get(&address)
                             .cloned()
                             .unwrap_or(1.0);
-                        // 2. Check Mute/Solo logic
-                        let sink_clone =
-                            match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
-                                // Mute enabled, Solo enabled -> Default only
-                                (true, true) => PlaybackSink::Default,
-                                // Mute disabled, Solo enabled -> Both
-                                (false, true) => PlaybackSink::Both,
-                                // Mute disabled, Solo disabled -> Mixer only
-                                (false, false) => PlaybackSink::Mixer,
-                                // Mute enabled, Solo disabled -> None
-                                (true, false) => PlaybackSink::None,
-                            };
-                        if sink_clone == PlaybackSink::None {
-                            info!("...Playback muted.");
-                            // Set pad color to selected (even though it's muted)
-                            push2.set_pad_color(coord, COLOR_SELECTED)?;
-                            continue;
-                        }
-                        // 3. Load sound data from cache or file
+
+                        // Load sound data from cache or file
                         let sound_data =
                             if let Some(data) = app_state.sound_data_cache.get(&address) {
                                 data.clone()
@@ -414,6 +454,15 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         };
                         push2.set_button_light(name, light)?;
                         info!("Mute Toggled: {}", app_state.is_mute_enabled);
+
+                        let current_sink =
+                            match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
+                                (true, true) => PlaybackSink::Default,
+                                (false, true) => PlaybackSink::Both,
+                                (false, false) => PlaybackSink::Mixer,
+                                (true, false) => PlaybackSink::None,
+                            };
+                        update_pipewire_links(current_sink);
                     }
                     ControlName::Solo => {
                         app_state.is_solo_enabled = !app_state.is_solo_enabled;
@@ -424,6 +473,15 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
                         };
                         push2.set_button_light(name, light)?;
                         info!("Solo Toggled: {}", app_state.is_solo_enabled);
+
+                        let current_sink =
+                            match (app_state.is_mute_enabled, app_state.is_solo_enabled) {
+                                (true, true) => PlaybackSink::Default,
+                                (false, true) => PlaybackSink::Both,
+                                (false, false) => PlaybackSink::Mixer,
+                                (true, false) => PlaybackSink::None,
+                            };
+                        update_pipewire_links(current_sink);
                     }
                     ControlName::Delete => {
                         app_state.is_delete_held = true;
