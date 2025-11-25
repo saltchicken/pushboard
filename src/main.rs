@@ -153,7 +153,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         }
     });
 
-    tokio::time::sleep(time::Duration::from_millis(2000)).await;
+    // tokio::time::sleep(time::Duration::from_millis(2000)).await;
 
     // --- Config Loading ---
     let mut push2 = Push2::new()?;
@@ -162,8 +162,8 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     let mut app_state = AppState {
         // mode: Mode::Playback,
         pad_files: HashMap::new(),
-        is_mute_enabled: false,
-        is_solo_enabled: false,
+        is_mute_enabled: true,
+        is_solo_enabled: true,
         playback_volume: HashMap::new(),
         pitch_shift_semitones: HashMap::new(),
         active_recording_key: None,
@@ -179,7 +179,9 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
         auto_stop_tasks: HashMap::new(),
     };
 
-    update_pipewire_links(PlaybackSink::Mixer);
+    // update_pipewire_links(PlaybackSink::Mixer);
+    push2.set_button_light(ControlName::Mute, BUTTON_LIGHT_ON)?;
+    push2.set_button_light(ControlName::Solo, BUTTON_LIGHT_ON)?;
 
     info!("\nConnection open. Soundboard example running.");
     info!(
