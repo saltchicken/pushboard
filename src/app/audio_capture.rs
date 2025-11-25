@@ -6,7 +6,7 @@ use spa::param::format::{MediaSubtype, MediaType};
 use spa::param::format_utils;
 use spa::pod::Pod;
 use std::collections::VecDeque;
-use std::convert::TryInto; // ‼️ Re-added
+use std::convert::TryInto;
 use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
@@ -156,7 +156,7 @@ pub fn run_capture_loop(
                         let data = &mut datas[0];
                         let n_samples = data.chunk().size() / (mem::size_of::<f32>() as u32);
                         if let Some(samples) = data.data() {
-                            // ‼️ Restore full audio processing logic
+
                             let mut all_samples = Vec::with_capacity(n_samples as usize);
                             for n in 0..(n_samples as usize) {
                                 let start = n * mem::size_of::<f32>();

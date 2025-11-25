@@ -6,13 +6,13 @@ use kira::{
 use log::{error, info};
 use std::{collections::HashMap, process::Command, sync::mpsc::Receiver, time::Duration};
 
-// ‼️ Refactored: Restored Constants for PipeWire routing
+
 const LINK_APP_MIXER: &str = "alsa_playback.pushboard";
 const LINK_TARGET_MIXER: &str = "MyMixer";
 const LINK_APP_DEFAULT: &str = "alsa_playback.pushboard";
 const LINK_TARGET_DEFAULT: &str = "alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink";
 
-// ‼️ Refactored: Restored PlaybackSink enum
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PlaybackSink {
     Default,
@@ -40,7 +40,7 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
     let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())?;
     let mut active_handles: HashMap<u8, StaticSoundHandle> = HashMap::new();
 
-    // ‼️ Refactored: Initialize routing on startup (optional, defaults to Mixer usually)
+
     // update_pipewire_links(PlaybackSink::Mixer);
 
     for command in rx {
@@ -72,7 +72,7 @@ pub fn run_kira_loop(rx: Receiver<KiraCommand>) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-// ‼️ Refactored: Restored the PipeWire linking logic
+
 pub fn update_pipewire_links(sink: PlaybackSink) {
     let run_link = |connect: bool, output: &str, input: &str| {
         let mut cmd = Command::new("pw-link");

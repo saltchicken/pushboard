@@ -1,4 +1,4 @@
-// ‼️ Refactored: This acts as the facade. exposing submodules.
+
 pub mod audio_capture;
 pub mod audio_player;
 pub mod events;
@@ -15,7 +15,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-// ‼️ Refactored: Main application logic extracted here
+
 pub async fn run() -> Result<(), Box<dyn Error>> {
     // 1. Setup Channels
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>();
@@ -36,10 +36,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     // 5. Main Loop
     loop {
-        // ‼️ Refactored: Event handling extracted to events.rs
+
         events::handle_incoming_events(&mut push2, &mut app_state, &app_rx).await?;
 
-        // ‼️ Refactored: UI Drawing extracted to ui.rs
+
         if let Err(e) = ui::draw_screen(&mut push2, &mut app_state) {
             error!("Display error: {}", e);
             break;
@@ -52,7 +52,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-// ‼️ Refactored: Extracted helper for spawning threads
+
 fn spawn_audio_threads(
     audio_rx: mpsc::Receiver<AudioCommand>,
     app_tx: mpsc::Sender<AppCommand>,
@@ -73,7 +73,7 @@ fn spawn_audio_threads(
     });
 }
 
-// ‼️ Refactored: Extracted helper for initial LED setup
+
 fn initial_hardware_setup(push2: &mut Push2, state: &mut AppState) -> Result<(), Box<dyn Error>> {
     state.update_pad_lights(push2)?;
     // Set initial button states

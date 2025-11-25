@@ -10,7 +10,7 @@ use std::sync::mpsc::Receiver;
 use std::time;
 use tokio::fs as tokio_fs;
 
-// ‼️ Refactored: Main event dispatcher
+
 pub async fn handle_incoming_events(
     push2: &mut Push2,
     state: &mut AppState,
@@ -38,7 +38,7 @@ pub async fn handle_incoming_events(
     Ok(())
 }
 
-// ‼️ Refactored: Pad Press Logic broken down
+
 async fn handle_pad_pressed(
     push2: &mut Push2,
     state: &mut AppState,
@@ -144,7 +144,7 @@ fn handle_playback_or_record(
     Ok(())
 }
 
-// ‼️ Refactored: Pad Release Logic
+
 fn handle_pad_released(
     push2: &mut Push2,
     state: &mut AppState,
@@ -181,7 +181,7 @@ fn handle_pad_released(
     Ok(())
 }
 
-// ‼️ Refactored: Button Handling
+
 fn handle_button_pressed(
     push2: &mut Push2,
     state: &mut AppState,
@@ -207,7 +207,7 @@ fn handle_button_pressed(
                 },
             )?;
             info!("Mute Toggled: {}", state.is_mute_enabled);
-            update_audio_routing(state); // ‼️ Call helper
+            update_audio_routing(state);
         }
         ControlName::Solo => {
             state.is_solo_enabled = !state.is_solo_enabled;
@@ -220,14 +220,14 @@ fn handle_button_pressed(
                 },
             )?;
             info!("Solo Toggled: {}", state.is_solo_enabled);
-            update_audio_routing(state); // ‼️ Call helper
+            update_audio_routing(state);
         }
         _ => {}
     }
     Ok(())
 }
 
-// ‼️ Refactored: New helper to calculate sink state
+
 fn update_audio_routing(state: &AppState) {
     let current_sink = match (state.is_mute_enabled, state.is_solo_enabled) {
         (true, true) => PlaybackSink::Default,
@@ -257,7 +257,7 @@ fn handle_button_released(
     Ok(())
 }
 
-// ‼️ Refactored: Encoder Logic
+
 fn handle_encoder_twist(
     state: &mut AppState,
     name: EncoderName,
@@ -307,7 +307,7 @@ fn handle_encoder_twist(
     Ok(())
 }
 
-// ‼️ Refactored: Trigger Logic
+
 fn trigger_sound_playback(
     state: &mut AppState,
     address: u8,
@@ -340,7 +340,7 @@ fn trigger_sound_playback(
     let start_sec = dur * start_pct;
 
     let settings = StaticSoundSettings::new()
-        .volume(volume as f32) // ‼️ Fix: cast to f32
+        .volume(volume as f32)
         .playback_rate(rate)
         .start_position(start_sec);
 
@@ -374,7 +374,7 @@ fn trigger_sound_playback(
     Ok(())
 }
 
-// ‼️ Refactored: AppCommand Handler
+
 fn handle_app_command(
     push2: &mut Push2,
     state: &mut AppState,

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use tokio::task::JoinHandle;
 
-// ‼️ Refactored: Constants moved to associated constants or top of file
+
 pub const COLOR_OFF: u8 = Push2Colors::BLACK;
 pub const COLOR_HAS_FILE: u8 = Push2Colors::BLUE_SKY;
 pub const COLOR_RECORDING: u8 = Push2Colors::RED;
@@ -48,7 +48,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    // ‼️ Refactored: Constructor encapsulates initialization logic
+
     pub fn new(
         audio_cmd_tx: mpsc::Sender<AudioCommand>,
         kira_cmd_tx: mpsc::Sender<KiraCommand>,
@@ -77,7 +77,7 @@ impl AppState {
         })
     }
 
-    // ‼️ Refactored: Helper to initialize pad lights based on file existence
+
     pub fn update_pad_lights(
         &mut self,
         push2: &mut Push2,

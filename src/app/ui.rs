@@ -5,7 +5,7 @@ use embedded_graphics::{
     primitives::{Line, Primitive, PrimitiveStyle},
 };
 use log::warn;
-use push2::{GuiApi, Push2}; // ‼️ Added GuiApi import here
+use push2::{GuiApi, Push2};
 
 // Constants moved here
 const WAVEFORM_Y_START: i32 = 0;
