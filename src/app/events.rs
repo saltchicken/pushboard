@@ -4,12 +4,11 @@ use crate::app::state::{
     COLOR_RECORDING, COLOR_SELECTED,
 };
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
-use log::{debug, error, info, warn};
+use log::{error, info};
 use push2::{ControlName, EncoderName, Push2, Push2Event};
 use std::sync::mpsc::Receiver;
 use std::time;
 use tokio::fs as tokio_fs;
-
 
 pub async fn handle_incoming_events(
     push2: &mut Push2,
@@ -37,7 +36,6 @@ pub async fn handle_incoming_events(
 
     Ok(())
 }
-
 
 async fn handle_pad_pressed(
     push2: &mut Push2,
@@ -144,7 +142,6 @@ fn handle_playback_or_record(
     Ok(())
 }
 
-
 fn handle_pad_released(
     push2: &mut Push2,
     state: &mut AppState,
@@ -180,7 +177,6 @@ fn handle_pad_released(
     }
     Ok(())
 }
-
 
 fn handle_button_pressed(
     push2: &mut Push2,
@@ -227,7 +223,6 @@ fn handle_button_pressed(
     Ok(())
 }
 
-
 fn update_audio_routing(state: &AppState) {
     let current_sink = match (state.is_mute_enabled, state.is_solo_enabled) {
         (true, true) => PlaybackSink::Default,
@@ -256,7 +251,6 @@ fn handle_button_released(
     }
     Ok(())
 }
-
 
 fn handle_encoder_twist(
     state: &mut AppState,
@@ -306,7 +300,6 @@ fn handle_encoder_twist(
     }
     Ok(())
 }
-
 
 fn trigger_sound_playback(
     state: &mut AppState,
@@ -374,7 +367,6 @@ fn trigger_sound_playback(
     Ok(())
 }
 
-
 fn handle_app_command(
     push2: &mut Push2,
     state: &mut AppState,
@@ -405,3 +397,4 @@ fn handle_app_command(
     }
     Ok(())
 }
+
