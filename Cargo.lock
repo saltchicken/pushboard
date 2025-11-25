@@ -1649,7 +1649,7 @@ dependencies = [
 [[package]]
 name = "push2"
 version = "0.1.0"
-source = "git+https://github.com/saltchicken/push2#3edfc56fe4ebcd16c7d77139b3fc37b80593d2f5"
+source = "git+https://github.com/saltchicken/push2?rev=3edfc56fe4ebcd16c7d77139b3fc37b80593d2f5#3edfc56fe4ebcd16c7d77139b3fc37b80593d2f5"
 dependencies = [
  "dirs",
  "embedded-graphics",

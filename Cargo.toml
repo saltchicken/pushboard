@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-push2 = { git = "https://github.com/saltchicken/push2", features = [
+push2 = { git = "https://github.com/saltchicken/push2", rev = "3edfc56fe4ebcd16c7d77139b3fc37b80593d2f5", features = [
   "waveform",
 ] }
 env_logger = "0.11.8"
