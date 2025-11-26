@@ -1,8 +1,8 @@
-use crate::app::audio_player::{self, KiraCommand, PlaybackSink};
 use crate::app::state::{
     AppCommand, AppState, AudioCommand, BUTTON_LIGHT_ON, COLOR_HAS_FILE, COLOR_OFF, COLOR_PLAYING,
     COLOR_RECORDING, COLOR_SELECTED,
 };
+use crate::audio::player::{self, KiraCommand, PlaybackSink}; // ‼️ Updated Import path
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 use log::{error, info};
 use push2::{ControlName, EncoderName, Push2, Push2Event};
@@ -33,7 +33,6 @@ pub async fn handle_incoming_events(
     while let Ok(app_event) = app_rx.try_recv() {
         handle_app_command(push2, state, app_event)?;
     }
-
     Ok(())
 }
 
@@ -74,14 +73,17 @@ async fn handle_delete_action(
                 error!("Failed to delete file: {}", e);
             }
         });
+
         // Clear state
         state.pitch_shift_semitones.remove(&address);
         state.playback_volume.remove(&address);
         state.waveform_cache.remove(&address);
         state.sound_data_cache.remove(&address);
+
         if let Some(task) = state.auto_stop_tasks.remove(&address) {
             task.abort();
         }
+
         push2.set_pad_color(coord, COLOR_OFF)?;
         if state.selected_for_edit == Some(address) {
             state.selected_for_edit = None;
@@ -100,6 +102,7 @@ fn handle_select_action(
     if !path.exists() {
         return Ok(());
     }
+
     // Deselect Logic
     if let Some(prev) = state.selected_for_edit {
         if prev == address {
@@ -112,6 +115,7 @@ fn handle_select_action(
             push2.set_pad_color(old_coord, COLOR_HAS_FILE)?;
         }
     }
+
     // Select new
     state.selected_for_edit = Some(address);
     push2.set_pad_color(coord, COLOR_SELECTED)?;
@@ -128,6 +132,7 @@ fn handle_playback_or_record(
     if path.exists() {
         push2.set_pad_color(coord, COLOR_PLAYING)?;
         trigger_sound_playback(state, address, path)?;
+
         // Auto-select on playback
         if state.selected_for_edit != Some(address) {
             // Logic to reset old selection color omitted for brevity, but follows same pattern
@@ -230,7 +235,7 @@ fn update_audio_routing(state: &AppState) {
         (false, false) => PlaybackSink::Mixer,
         (true, false) => PlaybackSink::None,
     };
-    audio_player::update_pipewire_links(current_sink);
+    player::update_pipewire_links(current_sink); // ‼️ Updated function call path
 }
 
 fn handle_button_released(
@@ -339,11 +344,13 @@ fn trigger_sound_playback(
 
     state
         .kira_cmd_tx
-        .send(KiraCommand::Play(audio_player::KiraPlayRequest {
+        .send(KiraCommand::Play(player::KiraPlayRequest {
+            // ‼️ Updated Type path
             pad_key: address,
             sound_data,
             settings,
         }))?;
+
     // 4. Auto-Stop Task
     let end_sec = dur * end_pct;
     let play_dur = (end_sec - start_sec).max(0.0);
@@ -386,7 +393,6 @@ fn handle_app_command(
             if let Some(addr) = target_addr {
                 state.waveform_cache.remove(&addr);
                 state.sound_data_cache.remove(&addr);
-
                 // Update Selection to new file
                 state.selected_for_edit = Some(addr);
                 if let Some(coord) = push2.button_map.get_note(addr) {
@@ -397,4 +403,3 @@ fn handle_app_command(
     }
     Ok(())
 }
-

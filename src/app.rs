@@ -1,13 +1,12 @@
-
-pub mod audio_capture;
-pub mod audio_player;
+// pub mod audio_capture; ‼️ Removed
+// pub mod audio_player;  ‼️ Removed
 pub mod events;
 pub mod state;
 pub mod ui;
 
-use crate::app::audio_capture::run_capture_loop;
-use crate::app::audio_player::run_kira_loop;
 use crate::app::state::{AppCommand, AppState, AudioCommand};
+use crate::audio::capture::run_capture_loop; // ‼️ Updated Import
+use crate::audio::player::{self, run_kira_loop}; // ‼️ Updated Import
 use log::{error, info};
 use push2::Push2;
 use std::error::Error;
@@ -15,12 +14,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-
 pub async fn run() -> Result<(), Box<dyn Error>> {
     // 1. Setup Channels
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>();
     let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
-    let (kira_tx, kira_rx) = mpsc::channel::<audio_player::KiraCommand>();
+    let (kira_tx, kira_rx) = mpsc::channel::<player::KiraCommand>(); // ‼️ Updated Type path
 
     // 2. Spawn Audio Threads
     spawn_audio_threads(audio_rx, app_tx.clone(), kira_rx);
@@ -36,27 +34,21 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     // 5. Main Loop
     loop {
-
         events::handle_incoming_events(&mut push2, &mut app_state, &app_rx).await?;
-
-
         if let Err(e) = ui::draw_screen(&mut push2, &mut app_state) {
             error!("Display error: {}", e);
             break;
         }
-
         // Maintain frame rate
         tokio::time::sleep(Duration::from_millis(1000 / 60)).await;
     }
-
     Ok(())
 }
-
 
 fn spawn_audio_threads(
     audio_rx: mpsc::Receiver<AudioCommand>,
     app_tx: mpsc::Sender<AppCommand>,
-    kira_rx: mpsc::Receiver<audio_player::KiraCommand>,
+    kira_rx: mpsc::Receiver<player::KiraCommand>, // ‼️ Updated Type path
 ) {
     thread::spawn(move || {
         info!("Audio capture thread started...");
@@ -73,7 +65,6 @@ fn spawn_audio_threads(
     });
 }
 
-
 fn initial_hardware_setup(push2: &mut Push2, state: &mut AppState) -> Result<(), Box<dyn Error>> {
     state.update_pad_lights(push2)?;
     // Set initial button states
@@ -81,3 +72,4 @@ fn initial_hardware_setup(push2: &mut Push2, state: &mut AppState) -> Result<(),
     push2.set_button_light(push2::ControlName::Solo, push2::Push2Colors::GREEN_PALE)?;
     Ok(())
 }
+

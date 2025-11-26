@@ -1,4 +1,4 @@
-use crate::app::audio_player::KiraCommand;
+use crate::audio::player::KiraCommand; // ‼️ Updated Import path
 use kira::sound::static_sound::StaticSoundData;
 use log::info;
 use push2::{PadCoord, Push2, Push2Colors};
@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use tokio::task::JoinHandle;
-
 
 pub const COLOR_OFF: u8 = Push2Colors::BLACK;
 pub const COLOR_HAS_FILE: u8 = Push2Colors::BLUE_SKY;
@@ -48,14 +47,12 @@ pub struct AppState {
 }
 
 impl AppState {
-
     pub fn new(
         audio_cmd_tx: mpsc::Sender<AudioCommand>,
         kira_cmd_tx: mpsc::Sender<KiraCommand>,
     ) -> std::io::Result<Self> {
         let audio_storage_path = get_audio_storage_path()?;
         info!("Audio storage path: {}", audio_storage_path.display());
-
         Ok(Self {
             pad_files: HashMap::new(),
             is_mute_enabled: true,
@@ -76,7 +73,6 @@ impl AppState {
             audio_storage_path,
         })
     }
-
 
     pub fn update_pad_lights(
         &mut self,
@@ -111,3 +107,4 @@ pub fn get_audio_storage_path() -> std::io::Result<PathBuf> {
         None => Err(std::io::Error::other("Could not find audio directory")),
     }
 }
+
