@@ -1,4 +1,4 @@
-// ‼️ Moved from src/app/audio_capture.rs
+
 use crate::app::state::{AppCommand, AudioCommand};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use pipewire as pw;

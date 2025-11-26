@@ -2,7 +2,7 @@ use crate::app::state::{
     AppCommand, AppState, AudioCommand, BUTTON_LIGHT_ON, COLOR_HAS_FILE, COLOR_OFF, COLOR_PLAYING,
     COLOR_RECORDING, COLOR_SELECTED,
 };
-use crate::audio::player::{self, KiraCommand, PlaybackSink}; // ‼️ Updated Import path
+use crate::audio::player::{self, KiraCommand, PlaybackSink};
 use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 use log::{error, info};
 use push2::{ControlName, EncoderName, Push2, Push2Event};
@@ -235,7 +235,7 @@ fn update_audio_routing(state: &AppState) {
         (false, false) => PlaybackSink::Mixer,
         (true, false) => PlaybackSink::None,
     };
-    player::update_pipewire_links(current_sink); // ‼️ Updated function call path
+    player::update_pipewire_links(current_sink);
 }
 
 fn handle_button_released(
@@ -345,7 +345,7 @@ fn trigger_sound_playback(
     state
         .kira_cmd_tx
         .send(KiraCommand::Play(player::KiraPlayRequest {
-            // ‼️ Updated Type path
+
             pad_key: address,
             sound_data,
             settings,

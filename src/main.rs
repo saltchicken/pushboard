@@ -1,5 +1,5 @@
 mod app;
-pub mod audio; // ‼️ New module registration
+pub mod audio;
 
 use std::error::Error;
 
@@ -8,4 +8,3 @@ async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     app::run().await
 }
-

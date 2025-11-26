@@ -1,12 +1,12 @@
-// pub mod audio_capture; ‼️ Removed
-// pub mod audio_player;  ‼️ Removed
+
+
 pub mod events;
 pub mod state;
 pub mod ui;
 
 use crate::app::state::{AppCommand, AppState, AudioCommand};
-use crate::audio::capture::run_capture_loop; // ‼️ Updated Import
-use crate::audio::player::{self, run_kira_loop}; // ‼️ Updated Import
+use crate::audio::capture::run_capture_loop;
+use crate::audio::player::{self, run_kira_loop};
 use log::{error, info};
 use push2::Push2;
 use std::error::Error;
@@ -18,7 +18,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     // 1. Setup Channels
     let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>();
     let (app_tx, app_rx) = mpsc::channel::<AppCommand>();
-    let (kira_tx, kira_rx) = mpsc::channel::<player::KiraCommand>(); // ‼️ Updated Type path
+    let (kira_tx, kira_rx) = mpsc::channel::<player::KiraCommand>();
 
     // 2. Spawn Audio Threads
     spawn_audio_threads(audio_rx, app_tx.clone(), kira_rx);
@@ -48,7 +48,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 fn spawn_audio_threads(
     audio_rx: mpsc::Receiver<AudioCommand>,
     app_tx: mpsc::Sender<AppCommand>,
-    kira_rx: mpsc::Receiver<player::KiraCommand>, // ‼️ Updated Type path
+    kira_rx: mpsc::Receiver<player::KiraCommand>,
 ) {
     thread::spawn(move || {
         info!("Audio capture thread started...");
@@ -72,4 +72,3 @@ fn initial_hardware_setup(push2: &mut Push2, state: &mut AppState) -> Result<(),
     push2.set_button_light(push2::ControlName::Solo, push2::Push2Colors::GREEN_PALE)?;
     Ok(())
 }
-
